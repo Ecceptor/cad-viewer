@@ -155,7 +155,31 @@
     // --- Scene Setup ---
     const container = document.getElementById('canvas-container');
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x161616); // Clean dark studio background
+
+    // --- 2-Color Studio Cyc Backdrop (Grey / Light Grey Equirectangular Panorama) ---
+    function createStudioBackdropTexture() {
+      const canvas = document.createElement('canvas');
+      canvas.width = 1024;
+      canvas.height = 512;
+      const ctx = canvas.getContext('2d');
+
+      // Studio Cyclorama vertical gradient: Light grey dome to deep neutral studio floor
+      const grad = ctx.createLinearGradient(0, 0, 0, canvas.height);
+      grad.addColorStop(0.0, '#585b63');   // Light grey dome ceiling
+      grad.addColorStop(0.35, '#3e4149');  // Mid-upper soft blend
+      grad.addColorStop(0.55, '#282a30');  // Studio horizon transition
+      grad.addColorStop(1.0, '#151619');   // Deep studio floor
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      const texture = new THREE.CanvasTexture(canvas);
+      texture.mapping = THREE.EquirectangularReflectionMapping;
+      texture.colorSpace = THREE.SRGBColorSpace;
+      return texture;
+    }
+
+    const studioBackdropTexture = createStudioBackdropTexture();
+    scene.background = studioBackdropTexture;
 
     // Camera (Eye height in meters: 1.6m default standing height)
     const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.01, 100);
@@ -188,16 +212,24 @@
     controls.target.set(0, 0.6, -1.5); // Focus at product placement position
     controls.update();
 
-    // Disable OrbitControls during WebXR sessions
+    // Disable OrbitControls during WebXR sessions and manage In-VR Floating Tablet
     renderer.xr.addEventListener('sessionstart', () => {
       controls.enabled = false;
       document.getElementById('ui-overlay').style.display = 'none';
       document.getElementById('desktop-hint').style.display = 'none';
+      if (typeof tabletGroup !== 'undefined' && tabletGroup) {
+        tabletGroup.visible = true;
+        if (typeof renderVRMenuCanvas === 'function') renderVRMenuCanvas();
+      }
     });
     renderer.xr.addEventListener('sessionend', () => {
       controls.enabled = true;
       document.getElementById('ui-overlay').style.display = 'flex';
       document.getElementById('desktop-hint').style.display = 'block';
+      if (typeof tabletGroup !== 'undefined' && tabletGroup) {
+        tabletGroup.visible = false;
+        hoveredButtonIndex = -1;
+      }
     });
 
     // --- Studio Ground Grid (Single, Clean 1m Meter Grid at y = 0) ---
@@ -267,15 +299,17 @@
     function setDefaultStudioEnvironment() {
       cleanupEnvironment();
       scene.environment = null;
-      scene.background = new THREE.Color(0x161616);
+      scene.background = studioBackdropTexture;
+      if (typeof renderVRMenuCanvas === 'function') renderVRMenuCanvas();
     }
 
     function updateBackgroundVisibility() {
       if (toggleBg360.checked && currentRenderTarget) {
         scene.background = currentRenderTarget.texture;
       } else {
-        scene.background = new THREE.Color(0x161616);
+        scene.background = studioBackdropTexture;
       }
+      if (typeof renderVRMenuCanvas === 'function') renderVRMenuCanvas();
     }
 
     function loadPresetEnvironment(url) {
@@ -283,6 +317,7 @@
         setDefaultStudioEnvironment();
         lastNonCustomEnv = 'default';
         updateStatus('Default Studio environment active', 'ready');
+        if (typeof renderVRMenuCanvas === 'function') renderVRMenuCanvas();
         return;
       }
 
@@ -294,12 +329,14 @@
         setEnvironmentFromTexture(texture);
         lastNonCustomEnv = url;
         updateStatus('Environment lighting active', 'ready');
+        if (typeof renderVRMenuCanvas === 'function') renderVRMenuCanvas();
       }, undefined, (err) => {
         console.error('Error loading environment map:', err);
         updateStatus('Failed to load environment map', 'error');
         setDefaultStudioEnvironment();
         envSelect.value = 'default';
         lastNonCustomEnv = 'default';
+        if (typeof renderVRMenuCanvas === 'function') renderVRMenuCanvas();
       });
     }
 
@@ -359,6 +396,302 @@
       updateBackgroundVisibility();
     });
 
+    // --- In-VR 3D Floating Tablet Menu ---
+    const vrCanvas = document.createElement('canvas');
+    vrCanvas.width = 512;
+    vrCanvas.height = 640;
+    const vrCtx = vrCanvas.getContext('2d');
+
+    const vrCanvasTexture = new THREE.CanvasTexture(vrCanvas);
+    vrCanvasTexture.colorSpace = THREE.SRGBColorSpace;
+
+    // Helper for rounded rectangles on canvas
+    function roundRect(ctx, x, y, width, height, radius) {
+      ctx.beginPath();
+      ctx.moveTo(x + radius, y);
+      ctx.lineTo(x + width - radius, y);
+      ctx.quadraticCurveTo(x + width, y, x + width, y + radius);
+      ctx.lineTo(x + width, y + height - radius);
+      ctx.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
+      ctx.lineTo(x + radius, y + height);
+      ctx.quadraticCurveTo(x, y + height, x, y + height - radius);
+      ctx.lineTo(x, y + radius);
+      ctx.quadraticCurveTo(x, y, x + radius, y);
+      ctx.closePath();
+    }
+
+    function getCurrentEnvName() {
+      const opt = envSelect.options[envSelect.selectedIndex];
+      return opt ? opt.text.replace(/\s*\(.*\)$/, '') : 'Default Studio';
+    }
+
+    const vrButtons = [
+      {
+        id: 'reset',
+        title: 'Reset Layout',
+        sub: () => 'Snap models flush to floor (y=0)',
+        x: 26, y: 110, w: 460, h: 80,
+        accent: '#3b82f6',
+        hoverAccent: '#60a5fa'
+      },
+      {
+        id: 'nextEnv',
+        title: 'Next Environment',
+        sub: () => `Lighting: ${getCurrentEnvName()}`,
+        x: 26, y: 204, w: 460, h: 80,
+        accent: '#8b5cf6',
+        hoverAccent: '#a78bfa'
+      },
+      {
+        id: 'toggleBg',
+        title: 'Toggle Background',
+        sub: () => toggleBg360.checked ? 'Background: 360 Panorama' : 'Background: 2-Color Studio Cyc',
+        x: 26, y: 298, w: 460, h: 80,
+        accent: '#f59e0b',
+        hoverAccent: '#fbbf24'
+      },
+      {
+        id: 'toggleGrid',
+        title: 'Toggle Grid',
+        sub: () => studioGrid.visible ? 'Ground Grid: Visible (1m)' : 'Ground Grid: Hidden',
+        x: 26, y: 392, w: 460, h: 80,
+        accent: '#06b6d4',
+        hoverAccent: '#22d3ee'
+      },
+      {
+        id: 'exitVR',
+        title: 'Exit VR',
+        sub: () => 'End session & return to browser',
+        x: 26, y: 486, w: 460, h: 80,
+        accent: '#ef4444',
+        hoverAccent: '#f87171'
+      }
+    ];
+
+    let hoveredButtonIndex = -1;
+    let clickedButtonIndex = -1;
+
+    function renderVRMenuCanvas() {
+      const w = vrCanvas.width;
+      const h = vrCanvas.height;
+
+      // Dark frosted background
+      vrCtx.fillStyle = '#0f131a';
+      roundRect(vrCtx, 0, 0, w, h, 28);
+      vrCtx.fill();
+
+      // Tablet border
+      vrCtx.lineWidth = 4;
+      vrCtx.strokeStyle = '#252e3d';
+      roundRect(vrCtx, 2, 2, w - 4, h - 4, 26);
+      vrCtx.stroke();
+
+      // Header Zone
+      vrCtx.fillStyle = '#161c26';
+      roundRect(vrCtx, 16, 16, w - 32, 76, 16);
+      vrCtx.fill();
+
+      // Brand Title
+      vrCtx.font = 'bold 22px system-ui, -apple-system, sans-serif';
+      vrCtx.fillStyle = '#60a5fa';
+      vrCtx.textAlign = 'left';
+      vrCtx.fillText('CAD VR STUDIO', 36, 48);
+
+      // 1:1 Tag
+      vrCtx.font = 'bold 11px system-ui, -apple-system, sans-serif';
+      vrCtx.fillStyle = '#10b981';
+      vrCtx.fillText('STRICT 1:1 PHYSICAL SCALE', 36, 70);
+
+      // Model Counter
+      vrCtx.font = '13px system-ui, -apple-system, sans-serif';
+      vrCtx.fillStyle = '#94a3b8';
+      vrCtx.textAlign = 'right';
+      vrCtx.fillText(`${loadedItems.length} Model${loadedItems.length === 1 ? '' : 's'} Active`, w - 36, 56);
+
+      // 5 Buttons
+      for (let i = 0; i < vrButtons.length; i++) {
+        const btn = vrButtons[i];
+        const isHovered = (hoveredButtonIndex === i);
+        const isClicked = (clickedButtonIndex === i);
+
+        // Background
+        if (isClicked) {
+          vrCtx.fillStyle = btn.accent;
+        } else if (isHovered) {
+          vrCtx.fillStyle = '#1e293b';
+        } else {
+          vrCtx.fillStyle = '#131822';
+        }
+        roundRect(vrCtx, btn.x, btn.y, btn.w, btn.h, 16);
+        vrCtx.fill();
+
+        // Border
+        vrCtx.lineWidth = isHovered ? 3 : 1.5;
+        vrCtx.strokeStyle = isHovered ? btn.hoverAccent : '#232c3d';
+        roundRect(vrCtx, btn.x, btn.y, btn.w, btn.h, 16);
+        vrCtx.stroke();
+
+        // Left accent indicator pill
+        vrCtx.fillStyle = isHovered ? btn.hoverAccent : btn.accent;
+        roundRect(vrCtx, btn.x + 8, btn.y + 14, 6, btn.h - 28, 3);
+        vrCtx.fill();
+
+        // Title text
+        vrCtx.font = 'bold 18px system-ui, -apple-system, sans-serif';
+        vrCtx.fillStyle = isClicked ? '#ffffff' : (isHovered ? '#ffffff' : '#e2e8f0');
+        vrCtx.textAlign = 'left';
+        vrCtx.fillText(btn.title, btn.x + 28, btn.y + 34);
+
+        // Subtitle text
+        vrCtx.font = '13px system-ui, -apple-system, sans-serif';
+        vrCtx.fillStyle = isClicked ? '#f1f5f9' : (isHovered ? btn.hoverAccent : '#94a3b8');
+        vrCtx.fillText(btn.sub(), btn.x + 28, btn.y + 60);
+
+        // Arrow
+        vrCtx.font = 'bold 20px system-ui, -apple-system, sans-serif';
+        vrCtx.fillStyle = isHovered ? btn.hoverAccent : '#475569';
+        vrCtx.textAlign = 'right';
+        vrCtx.fillText('›', btn.x + btn.w - 20, btn.y + 46);
+      }
+
+      // Footer
+      vrCtx.font = '12px system-ui, -apple-system, sans-serif';
+      vrCtx.fillStyle = '#64748b';
+      vrCtx.textAlign = 'center';
+      vrCtx.fillText('Aim controller laser & squeeze trigger to select', w / 2, 608);
+
+      vrCanvasTexture.needsUpdate = true;
+    }
+
+    // 3D Mesh for Floating Tablet (Plane + Bezel)
+    const vrMenuGeo = new THREE.PlaneGeometry(0.36, 0.45);
+    const vrMenuMat = new THREE.MeshBasicMaterial({
+      map: vrCanvasTexture,
+      transparent: true,
+      side: THREE.DoubleSide
+    });
+    const vrMenuMesh = new THREE.Mesh(vrMenuGeo, vrMenuMat);
+    vrMenuMesh.name = 'VR_Menu_Screen';
+
+    const bezelGeo = new THREE.BoxGeometry(0.375, 0.465, 0.012);
+    const bezelMat = new THREE.MeshStandardMaterial({
+      color: 0x111317,
+      roughness: 0.4,
+      metalness: 0.6
+    });
+    const bezelMesh = new THREE.Mesh(bezelGeo, bezelMat);
+    bezelMesh.position.z = -0.007;
+
+    const tabletGroup = new THREE.Group();
+    tabletGroup.name = 'VR_Floating_Tablet';
+    tabletGroup.add(bezelMesh);
+    tabletGroup.add(vrMenuMesh);
+
+    // Position comfortably at chest height: x = -0.6m, y = 1.2m, z = -1.15m
+    tabletGroup.position.set(-0.6, 1.2, -1.15);
+
+    // Orient tablet: level horizontal top edge, normal facing user's eye level (0, 1.5, 0)
+    const lookTarget = new THREE.Vector3(0, 1.5, 0);
+    const forward = lookTarget.clone().sub(tabletGroup.position).normalize();
+    const upVec = new THREE.Vector3(0, 1, 0);
+    const rightVec = new THREE.Vector3().crossVectors(upVec, forward).normalize();
+    const correctedUp = new THREE.Vector3().crossVectors(forward, rightVec).normalize();
+    const rotMatrix = new THREE.Matrix4();
+    rotMatrix.makeBasis(rightVec, correctedUp, forward);
+    tabletGroup.quaternion.setFromRotationMatrix(rotMatrix);
+
+    tabletGroup.visible = false;
+    scene.add(tabletGroup);
+
+    renderVRMenuCanvas();
+
+    function triggerHaptic(controller, intensity = 0.3, duration = 30) {
+      try {
+        const session = renderer.xr.getSession();
+        if (session && session.inputSources) {
+          for (const source of session.inputSources) {
+            if (source.gamepad && source.gamepad.hapticActuators && source.gamepad.hapticActuators[0]) {
+              source.gamepad.hapticActuators[0].pulse(intensity, duration);
+            }
+          }
+        }
+      } catch (e) {}
+    }
+
+    function checkVRMenuHover(controller) {
+      if (!tabletGroup || !tabletGroup.visible) return null;
+      workingMatrix.identity().extractRotation(controller.matrixWorld);
+      raycaster.ray.origin.setFromMatrixPosition(controller.matrixWorld);
+      raycaster.ray.direction.set(0, 0, -1).applyMatrix4(workingMatrix);
+
+      const intersects = raycaster.intersectObject(vrMenuMesh, false);
+      if (intersects.length > 0) {
+        const hit = intersects[0];
+        const uv = hit.uv;
+        if (uv) {
+          const canvasX = uv.x * vrCanvas.width;
+          const canvasY = (1 - uv.y) * vrCanvas.height;
+          let hitBtn = -1;
+          for (let i = 0; i < vrButtons.length; i++) {
+            const b = vrButtons[i];
+            if (canvasX >= b.x && canvasX <= b.x + b.w &&
+                canvasY >= b.y && canvasY <= b.y + b.h) {
+              hitBtn = i;
+              break;
+            }
+          }
+          return { hit, buttonIndex: hitBtn, canvasX, canvasY };
+        }
+      }
+      return null;
+    }
+
+    function flashButtonClicked(idx) {
+      clickedButtonIndex = idx;
+      renderVRMenuCanvas();
+      setTimeout(() => {
+        clickedButtonIndex = -1;
+        renderVRMenuCanvas();
+      }, 160);
+    }
+
+    function handleVRButtonClick(actionId) {
+      switch (actionId) {
+        case 'reset':
+          recalculateLayout();
+          updateStatus("Layout reset & snapped to floor", 'success');
+          break;
+
+        case 'nextEnv': {
+          const options = Array.from(envSelect.options).filter(opt => opt.value !== 'custom');
+          const currentVal = envSelect.value;
+          let currentIndex = options.findIndex(opt => opt.value === currentVal);
+          if (currentIndex === -1) currentIndex = 0;
+          const nextIndex = (currentIndex + 1) % options.length;
+          const nextVal = options[nextIndex].value;
+          envSelect.value = nextVal;
+          loadPresetEnvironment(nextVal);
+          break;
+        }
+
+        case 'toggleBg':
+          toggleBg360.checked = !toggleBg360.checked;
+          updateBackgroundVisibility();
+          break;
+
+        case 'toggleGrid':
+          studioGrid.visible = !studioGrid.visible;
+          break;
+
+        case 'exitVR': {
+          const session = renderer.xr.getSession();
+          if (session) session.end();
+          break;
+        }
+      }
+      renderVRMenuCanvas();
+    }
+
     // --- WebXR Quest Controller Interaction (6DOF Grab & Laser) ---
     const controllerModelFactory = new XRControllerModelFactory();
     const controllers = [];
@@ -415,6 +748,19 @@
 
     function onSelectStart(event) {
       const controller = event.target;
+
+      // Priority 1: In-VR Menu button click
+      if (tabletGroup && tabletGroup.visible) {
+        const menuHover = checkVRMenuHover(controller);
+        if (menuHover && menuHover.buttonIndex !== -1) {
+          triggerHaptic(controller, 0.45, 45);
+          flashButtonClicked(menuHover.buttonIndex);
+          handleVRButtonClick(vrButtons[menuHover.buttonIndex].id);
+          return;
+        }
+      }
+
+      // Priority 2: 6DOF Grab CAD Model
       const targetGroup = getIntersectedModelGroup(controller);
       if (targetGroup) {
         grabbedObject = targetGroup;
@@ -425,15 +771,7 @@
         const laser = controller.getObjectByName('laser');
         if (laser) laser.material.color.setHex(0x10b981); // Green while grabbed
 
-        // Quest Haptic Pulse
-        const session = renderer.xr.getSession();
-        if (session && session.inputSources) {
-          for (const source of session.inputSources) {
-            if (source.gamepad && source.gamepad.hapticActuators && source.gamepad.hapticActuators[0]) {
-              source.gamepad.hapticActuators[0].pulse(0.4, 40);
-            }
-          }
-        }
+        triggerHaptic(controller, 0.4, 40);
       }
     }
 
@@ -540,7 +878,10 @@
      */
     function recalculateLayout() {
       const count = loadedItems.length;
-      if (count === 0) return;
+      if (count === 0) {
+        if (typeof renderVRMenuCanvas === 'function') renderVRMenuCanvas();
+        return;
+      }
 
       const gap = 0.4; // 0.4 meter (40cm) clear gap between products
 
@@ -549,6 +890,7 @@
         const item = loadedItems[0];
         item.group.position.set(0, 0, -1.5);
         item.group.rotation.set(0, 0, 0);
+        if (typeof renderVRMenuCanvas === 'function') renderVRMenuCanvas();
         return;
       }
 
@@ -569,6 +911,7 @@
         item.group.rotation.set(0, 0, 0);
         currentLeftEdge += item.width + gap;
       }
+      if (typeof renderVRMenuCanvas === 'function') renderVRMenuCanvas();
     }
 
     // --- File Input & Drag-and-Drop Event Handlers ---
@@ -599,6 +942,7 @@
       });
       loadedItems.length = 0;
       updateUI();
+      if (typeof renderVRMenuCanvas === 'function') renderVRMenuCanvas();
       updateStatus("Scene cleared", 'ready');
     });
 
@@ -672,6 +1016,7 @@
         `;
         modelListEl.appendChild(itemDiv);
       });
+      if (typeof renderVRMenuCanvas === 'function') renderVRMenuCanvas();
     }
 
     // --- Responsive Window Resizing ---
@@ -685,18 +1030,46 @@
     let frameCount = 0;
     renderer.setAnimationLoop((timestamp, frame) => {
       frameCount++;
-      // Check laser hover only every 6th frame (~15Hz) instead of 90Hz to save CPU
-      if (renderer.xr.isPresenting && !grabbedObject && frameCount % 6 === 0) {
+
+      if (renderer.xr.isPresenting) {
+        let anyMenuHover = false;
+
         controllers.forEach(controller => {
-          const hovered = getIntersectedModelGroup(controller);
           const laser = controller.getObjectByName('laser');
-          if (laser) {
-            laser.material.color.setHex(hovered ? 0x60a5fa : 0x3b82f6);
+          if (!laser) return;
+
+          if (grabbedObject) {
+            laser.material.color.setHex(grabbingController === controller ? 0x10b981 : 0x3b82f6);
+            return;
+          }
+
+          // Priority 1: Check In-VR Floating Menu Hover
+          const menuHover = checkVRMenuHover(controller);
+          if (menuHover) {
+            anyMenuHover = true;
+            laser.material.color.setHex(menuHover.buttonIndex !== -1 ? 0x10b981 : 0x38bdf8);
+            if (hoveredButtonIndex !== menuHover.buttonIndex) {
+              hoveredButtonIndex = menuHover.buttonIndex;
+              if (hoveredButtonIndex !== -1) {
+                triggerHaptic(controller, 0.15, 15);
+              }
+              renderVRMenuCanvas();
+            }
+            return;
+          }
+
+          // Priority 2: Check CAD Model Hover (every 3rd frame ~25-30Hz)
+          if (frameCount % 3 === 0) {
+            const hoveredModel = getIntersectedModelGroup(controller);
+            laser.material.color.setHex(hoveredModel ? 0x60a5fa : 0x3b82f6);
           }
         });
-      }
 
-      if (!renderer.xr.isPresenting) {
+        if (!anyMenuHover && hoveredButtonIndex !== -1) {
+          hoveredButtonIndex = -1;
+          renderVRMenuCanvas();
+        }
+      } else {
         controls.update();
       }
 
