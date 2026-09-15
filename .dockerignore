@@ -1,0 +1,7 @@
+.git
+.gitignore
+.dockerignore
+.vscode
+.gemini
+README.md
+deploy.ps1

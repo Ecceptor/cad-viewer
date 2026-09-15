@@ -1,0 +1,611 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <meta name="description" content="Confidential 1:1 Physical Scale CAD WebXR Viewer for Meta Quest Browser">
+  <title>1:1 CAD WebXR Studio Viewer</title>
+  <link rel="stylesheet" href="style.css">
+
+  <!-- Three.js and Addons via ES Modules Importmap -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+    }
+  }
+  </script>
+</head>
+<body>
+  <!-- Security Gatekeeper Modal (Enforces password protection on static hosting / GitHub Pages) -->
+  <div id="auth-overlay">
+    <div class="auth-box">
+      <div class="auth-icon">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+          <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+        </svg>
+      </div>
+      <div class="auth-title">Confidential CAD VR Review</div>
+      <div class="auth-desc">
+        Strict 1:1 Physical Scale Product Studio.<br>
+        Enter the security key to unlock this viewer.
+      </div>
+      <form id="authForm" class="auth-input-group" onsubmit="return false;">
+        <input type="password" id="authPassword" class="auth-input" placeholder="Security Password" autocomplete="current-password" autofocus required>
+        <button type="submit" id="btnUnlock" class="btn btn-primary">Unlock Viewer</button>
+        <div id="authError" class="auth-error"></div>
+      </form>
+    </div>
+  </div>
+
+  <!-- 3D WebGL / WebXR Viewport -->
+  <div id="canvas-container"></div>
+
+  <!-- UI Overlay pinned to screen (Accessible via Quest Browser Window & Desktop) -->
+  <div id="ui-overlay">
+    <div class="panel">
+      <div class="panel-header">
+        <div class="title-badge-group">
+          <div class="panel-title">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
+              <polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
+              <line x1="12" y1="22.08" x2="12" y2="12"></line>
+            </svg>
+            CAD VR Studio
+          </div>
+          <span class="scale-tag">STRICT 1:1 PHYSICAL SCALE</span>
+        </div>
+      </div>
+
+      <!-- Action Buttons -->
+      <div class="button-group">
+        <button id="btnAddModel" class="btn btn-primary" title="Select .glb files from headset/device storage">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 5v14M5 12h14"/>
+          </svg>
+          Add Product Model (.glb)
+        </button>
+
+        <button id="btnResetLayout" class="btn btn-secondary" title="Reset user transformations and snap flush to floor grid">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
+            <path d="M3 3v5h5"/>
+          </svg>
+          Reset Layout & Snap to Floor
+        </button>
+
+        <button id="btnClearAll" class="btn btn-danger" title="Remove all models from scene">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="3 6 5 6 21 6"></polyline>
+            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+          </svg>
+          Clear All
+        </button>
+      </div>
+
+      <!-- Live Status & Physical Dimension Inspector -->
+      <div class="status-card">
+        <div class="status-row">
+          <span>Status:</span>
+          <span id="statusText" class="status-badge">
+            <span class="status-dot"></span> Ready (1:1 Native Scale)
+          </span>
+        </div>
+        <div class="status-row">
+          <span>Loaded Models:</span>
+          <span id="modelCount">0 models</span>
+        </div>
+        <div id="model-list-panel"></div>
+        <div class="security-note">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+            <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+          </svg>
+          Zero-Upload: Models stay 100% in local memory
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Hidden HTML File Input for in-memory loading -->
+  <input type="file" id="fileInput" accept=".glb" multiple style="display: none;">
+
+  <!-- Fullscreen Drag & Drop Zone -->
+  <div id="drop-zone">
+    <div class="drop-message">Drop .GLB CAD Models Here (Zero-Upload)</div>
+  </div>
+
+  <!-- Desktop Controls Guide -->
+  <div id="desktop-hint">
+    <strong>Desktop:</strong> Left-drag Orbit | Right-drag Pan | Scroll Zoom<br>
+    <strong>Meta Quest:</strong> Aim laser with Controller, squeeze Trigger to grab/move 6DOF
+  </div>
+
+  <!-- Application Logic -->
+  <script type="module">
+    import * as THREE from 'three';
+    import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+    import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+    import { VRButton } from 'three/addons/webxr/VRButton.js';
+    import { XRControllerModelFactory } from 'three/addons/webxr/XRControllerModelFactory.js';
+
+    // --- Authentication Gatekeeper (SHA-256 for CadVR2026!) ---
+    const TARGET_HASH = "8bac064ebb26ba31989c7f7843fc0d2e9d7125e166e7716bde3f4cf23697366c";
+    const authOverlay = document.getElementById('auth-overlay');
+    const authForm = document.getElementById('authForm');
+    const authPassword = document.getElementById('authPassword');
+    const authError = document.getElementById('authError');
+
+    async function hashString(str) {
+      const encoder = new TextEncoder();
+      const data = encoder.encode(str);
+      const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+      const hashArray = Array.from(new Uint8Array(hashBuffer));
+      return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+    }
+
+    // Check if session already authenticated
+    if (sessionStorage.getItem('cad_viewer_authed') === 'true') {
+      authOverlay.classList.add('hidden');
+    }
+
+    authForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const val = authPassword.value;
+      const hash = await hashString(val);
+      if (hash === TARGET_HASH) {
+        sessionStorage.setItem('cad_viewer_authed', 'true');
+        authOverlay.classList.add('hidden');
+      } else {
+        authError.textContent = "Access Denied: Incorrect Password";
+        authPassword.value = '';
+        authPassword.focus();
+      }
+    });
+
+    // --- State & Registry ---
+    const loadedItems = []; // Array of { id, group, model, fileName, dimensions, nativeBox }
+    let isUserInteractingXR = false;
+
+    // --- Scene Setup ---
+    const container = document.getElementById('canvas-container');
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x161616); // Dark studio background
+
+    // Camera (Eye height in meters: 1.6m default standing height)
+    const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.01, 100);
+    camera.position.set(0, 1.4, 1.2);
+
+    // Renderer configured for high-fidelity CAD review & WebXR
+    const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.1;
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+    // WebXR Configuration for Meta Quest Browser
+    renderer.xr.enabled = true;
+    renderer.xr.setReferenceSpaceType('local-floor'); // Essential for Quest 2/3 physical floor calibration
+    container.appendChild(renderer.domElement);
+
+    // Add VR Enter Button to DOM
+    document.body.appendChild(VRButton.createButton(renderer));
+
+    // OrbitControls for flat-screen 2D preview
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.05;
+    controls.target.set(0, 0.6, -1.5); // Focus at product placement position
+    controls.update();
+
+    // Disable OrbitControls during WebXR sessions
+    renderer.xr.addEventListener('sessionstart', () => {
+      controls.enabled = false;
+      document.getElementById('ui-overlay').style.display = 'none';
+      document.getElementById('desktop-hint').style.display = 'none';
+    });
+    renderer.xr.addEventListener('sessionend', () => {
+      controls.enabled = true;
+      document.getElementById('ui-overlay').style.display = 'flex';
+      document.getElementById('desktop-hint').style.display = 'block';
+    });
+
+    // --- Studio Ground Grid & Measurement Reference ---
+    // 1m Major Grid (20m x 20m)
+    const majorGrid = new THREE.GridHelper(20, 20, 0x444444, 0x222222);
+    majorGrid.position.y = 0;
+    scene.add(majorGrid);
+
+    // 0.1m (10cm) Fine CAD Grid around viewing station (4m x 4m)
+    const fineGrid = new THREE.GridHelper(4, 40, 0x3b82f6, 0x1e293b);
+    fineGrid.position.set(0, 0.001, -1.5); // Slightly raised above major grid to prevent z-fighting
+    scene.add(fineGrid);
+
+    // Shadow receiver ground plane (subtle studio contact shadow)
+    const groundGeo = new THREE.PlaneGeometry(30, 30);
+    const groundMat = new THREE.ShadowMaterial({ opacity: 0.35 });
+    const ground = new THREE.Mesh(groundGeo, groundMat);
+    ground.rotation.x = -Math.PI / 2;
+    ground.position.y = -0.001;
+    ground.receiveShadow = true;
+    scene.add(ground);
+
+    // --- Multi-Directional Studio Lighting for CAD Inspection ---
+    // Ambient / Hemisphere fill
+    const hemiLight = new THREE.HemisphereLight(0xffffff, 0x161616, 1.1);
+    scene.add(hemiLight);
+
+    // Key Light (Primary directional with soft shadows)
+    const keyLight = new THREE.DirectionalLight(0xffffff, 2.0);
+    keyLight.position.set(3, 5, 2);
+    keyLight.castShadow = true;
+    keyLight.shadow.mapSize.width = 2048;
+    keyLight.shadow.mapSize.height = 2048;
+    keyLight.shadow.bias = -0.0001;
+    scene.add(keyLight);
+
+    // Fill Light (Softens contrast on left side)
+    const fillLight = new THREE.DirectionalLight(0x90b4ce, 1.2);
+    fillLight.position.set(-3, 3, -0.5);
+    scene.add(fillLight);
+
+    // Rim / Backlight (Edge definition for product contours)
+    const rimLight = new THREE.DirectionalLight(0xffecd2, 1.4);
+    rimLight.position.set(0, 4, -4);
+    scene.add(rimLight);
+
+    // Top Overhead Light
+    const topLight = new THREE.DirectionalLight(0xffffff, 0.9);
+    topLight.position.set(0, 6, -1.5);
+    scene.add(topLight);
+
+    // --- WebXR Quest Controller Interaction (6DOF Grab & Laser) ---
+    const controllerModelFactory = new XRControllerModelFactory();
+    const controllers = [];
+    const raycaster = new THREE.Raycaster();
+    const workingMatrix = new THREE.Matrix4();
+    let grabbedObject = null;
+    let grabbingController = null;
+
+    for (let i = 0; i < 2; i++) {
+      // Controller input events
+      const controller = renderer.xr.getController(i);
+      controller.addEventListener('selectstart', onSelectStart);
+      controller.addEventListener('selectend', onSelectEnd);
+      controller.addEventListener('squeezestart', onSelectStart);
+      controller.addEventListener('squeezeend', onSelectEnd);
+      scene.add(controller);
+      controllers.push(controller);
+
+      // Visual Grip Model
+      const grip = renderer.xr.getControllerGrip(i);
+      grip.add(controllerModelFactory.createControllerModel(grip));
+      scene.add(grip);
+
+      // Visual Laser Pointer (2m long line)
+      const laserGeo = new THREE.BufferGeometry().setFromPoints([
+        new THREE.Vector3(0, 0, 0),
+        new THREE.Vector3(0, 0, -3)
+      ]);
+      const laserMat = new THREE.LineBasicMaterial({
+        color: 0x3b82f6,
+        transparent: true,
+        opacity: 0.7,
+        linewidth: 2
+      });
+      const laser = new THREE.Line(laserGeo, laserMat);
+      laser.name = 'laser';
+      controller.add(laser);
+    }
+
+    function getIntersectedModelGroup(controller) {
+      workingMatrix.identity().extractRotation(controller.matrixWorld);
+      raycaster.ray.origin.setFromMatrixPosition(controller.matrixWorld);
+      raycaster.ray.direction.set(0, 0, -1).applyMatrix4(workingMatrix);
+
+      const targetMeshes = [];
+      loadedItems.forEach(item => {
+        item.group.traverse(child => {
+          if (child.isMesh) {
+            targetMeshes.push(child);
+          }
+        });
+      });
+
+      const intersects = raycaster.intersectObjects(targetMeshes, false);
+      if (intersects.length > 0) {
+        let current = intersects[0].object;
+        while (current.parent && current.parent !== scene) {
+          const matchedItem = loadedItems.find(it => it.group === current);
+          if (matchedItem) return matchedItem.group;
+          current = current.parent;
+        }
+      }
+      return null;
+    }
+
+    function onSelectStart(event) {
+      const controller = event.target;
+      const targetGroup = getIntersectedModelGroup(controller);
+      if (targetGroup) {
+        grabbedObject = targetGroup;
+        grabbingController = controller;
+        controller.attach(targetGroup); // Preserves world transform while parenting to controller
+
+        // Visual feedback on laser
+        const laser = controller.getObjectByName('laser');
+        if (laser) laser.material.color.setHex(0x10b981); // Green while grabbed
+
+        // Quest Haptic Pulse
+        const session = renderer.xr.getSession();
+        if (session && session.inputSources) {
+          for (const source of session.inputSources) {
+            if (source.gamepad && source.gamepad.hapticActuators && source.gamepad.hapticActuators[0]) {
+              source.gamepad.hapticActuators[0].pulse(0.4, 40);
+            }
+          }
+        }
+      }
+    }
+
+    function onSelectEnd(event) {
+      const controller = event.target;
+      if (grabbingController === controller && grabbedObject) {
+        scene.attach(grabbedObject); // Return to root scene preserving current hand placement
+        const laser = controller.getObjectByName('laser');
+        if (laser) laser.material.color.setHex(0x3b82f6); // Reset to blue
+        grabbedObject = null;
+        grabbingController = null;
+      }
+    }
+
+    // --- Core 1:1 In-Memory Loading & Layout Engine ---
+
+    /**
+     * Parse GLB binary bytes client-side in RAM (Zero network upload)
+     * Strictly retains internal scale (1, 1, 1).
+     */
+    function loadGLBArrayBuffer(arrayBuffer, fileName) {
+      updateStatus(`Parsing ${fileName}...`, 'loading');
+      const loader = new GLTFLoader();
+
+      loader.parse(arrayBuffer, '', (gltf) => {
+        const model = gltf.scene;
+
+        // CRITICAL REQUIREMENT: Strict 1:1 Physical Scale
+        // Absolutely NO automatic normalization or re-scaling
+        model.scale.set(1, 1, 1);
+
+        // Enable shadows and proper material handling
+        model.traverse((node) => {
+          if (node.isMesh) {
+            node.castShadow = true;
+            node.receiveShadow = true;
+            if (node.material) {
+              node.material.depthWrite = true;
+              node.material.side = THREE.DoubleSide; // Clean rendering for thin-walled CAD solids
+            }
+          }
+        });
+
+        // Compute exact bounding box in native CAD dimensions
+        model.updateMatrixWorld(true);
+        const box = new THREE.Box3().setFromObject(model);
+        const size = new THREE.Vector3();
+        box.getSize(size);
+        const center = new THREE.Vector3();
+        box.getCenter(center);
+
+        // Parent Group to hold this individual model
+        const group = new THREE.Group();
+        group.name = `CAD_Group_${fileName}`;
+        scene.add(group);
+
+        // Base Alignment & Floor Snapping inside parent group:
+        // 1. Offset y -= box.min.y so lowest physical surface sits flush on y = 0
+        // 2. Horizontally center model relative to group origin (0, 0)
+        model.position.y -= box.min.y;
+        model.position.x -= center.x;
+        model.position.z -= center.z;
+        group.add(model);
+
+        // Register in state
+        const itemRecord = {
+          id: Symbol(fileName),
+          group: group,
+          model: model,
+          fileName: fileName,
+          nativeBox: box.clone(),
+          width: size.x,
+          height: size.y,
+          depth: size.z,
+          center: center
+        };
+        loadedItems.push(itemRecord);
+
+        // Recompute side-by-side distribution
+        recalculateLayout();
+        updateUI();
+        updateStatus(`Model loaded at 1:1 scale`, 'success');
+      }, (err) => {
+        console.error("GLTF Parse Error:", err);
+        updateStatus(`Error parsing ${fileName}`, 'error');
+      });
+    }
+
+    /**
+     * Smart Side-by-Side Distribution & Floor Snapping:
+     * - Single model: Position at x = 0, y = 0, z = -1.5m
+     * - Multiple models: Space side-by-side along X-axis with 0.4m gap, cluster centered at x = 0
+     * - Clears any user-applied controller rotations/translations
+     */
+    function recalculateLayout() {
+      const count = loadedItems.length;
+      if (count === 0) return;
+
+      const gap = 0.4; // 0.4 meter (40cm) clear gap between products
+
+      if (count === 1) {
+        // Single Model: Position at x = 0, y = 0, z = -1.5m
+        const item = loadedItems[0];
+        item.group.position.set(0, 0, -1.5);
+        item.group.rotation.set(0, 0, 0);
+        return;
+      }
+
+      // Multiple Models: Calculate total cluster span along X
+      let totalWidthSpan = 0;
+      for (let i = 0; i < count; i++) {
+        totalWidthSpan += loadedItems[i].width;
+        if (i < count - 1) totalWidthSpan += gap;
+      }
+
+      // Starting X so the entire cluster is centered at x = 0
+      let currentLeftEdge = -totalWidthSpan / 2;
+
+      for (let i = 0; i < count; i++) {
+        const item = loadedItems[i];
+        const itemCenterX = currentLeftEdge + (item.width / 2);
+        item.group.position.set(itemCenterX, 0, -1.5);
+        item.group.rotation.set(0, 0, 0);
+        currentLeftEdge += item.width + gap;
+      }
+    }
+
+    // --- File Input & Drag-and-Drop Event Handlers ---
+    const fileInput = document.getElementById('fileInput');
+    const btnAddModel = document.getElementById('btnAddModel');
+    const btnResetLayout = document.getElementById('btnResetLayout');
+    const btnClearAll = document.getElementById('btnClearAll');
+    const dropZone = document.getElementById('drop-zone');
+
+    btnAddModel.addEventListener('click', () => {
+      fileInput.click();
+    });
+
+    fileInput.addEventListener('change', (e) => {
+      const files = Array.from(e.target.files);
+      processFiles(files);
+      fileInput.value = ''; // Reset input so same file can be reloaded if needed
+    });
+
+    btnResetLayout.addEventListener('click', () => {
+      recalculateLayout();
+      updateStatus("Layout reset & snapped to floor", 'success');
+    });
+
+    btnClearAll.addEventListener('click', () => {
+      loadedItems.forEach(item => {
+        scene.remove(item.group);
+      });
+      loadedItems.length = 0;
+      updateUI();
+      updateStatus("Scene cleared", 'ready');
+    });
+
+    function processFiles(files) {
+      const glbFiles = files.filter(f => f.name.toLowerCase().endsWith('.glb'));
+      if (glbFiles.length === 0) {
+        alert("Please select .glb CAD files.");
+        return;
+      }
+
+      glbFiles.forEach(file => {
+        const reader = new FileReader();
+        reader.onload = (event) => {
+          loadGLBArrayBuffer(event.target.result, file.name);
+        };
+        reader.readAsArrayBuffer(file);
+      });
+    }
+
+    // Drag and Drop Handling
+    window.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      dropZone.classList.add('active');
+    });
+    window.addEventListener('dragleave', (e) => {
+      if (e.relatedTarget === null) dropZone.classList.remove('active');
+    });
+    window.addEventListener('drop', (e) => {
+      e.preventDefault();
+      dropZone.classList.remove('active');
+      if (e.dataTransfer && e.dataTransfer.files) {
+        processFiles(Array.from(e.dataTransfer.files));
+      }
+    });
+
+    // --- UI Updates & Physical Dimension Formatting ---
+    function updateStatus(msg, type = 'ready') {
+      const statusText = document.getElementById('statusText');
+      const dot = statusText.querySelector('.status-dot');
+      statusText.innerHTML = `<span class="status-dot"></span> ${msg}`;
+      if (type === 'error') {
+        statusText.style.color = '#ef4444';
+      } else if (type === 'loading') {
+        statusText.style.color = '#f59e0b';
+      } else {
+        statusText.style.color = '#10b981';
+      }
+    }
+
+    function updateUI() {
+      const modelCountEl = document.getElementById('modelCount');
+      const modelListEl = document.getElementById('model-list-panel');
+      modelCountEl.textContent = `${loadedItems.length} model${loadedItems.length === 1 ? '' : 's'}`;
+
+      modelListEl.innerHTML = '';
+      loadedItems.forEach((item, index) => {
+        const itemDiv = document.createElement('div');
+        itemDiv.className = 'model-item';
+
+        // Format dimensions: Real CAD meters and centimeters
+        const wCm = (item.width * 100).toFixed(1);
+        const hCm = (item.height * 100).toFixed(1);
+        const dCm = (item.depth * 100).toFixed(1);
+
+        itemDiv.innerHTML = `
+          <div class="model-item-header">#${index + 1}: ${item.fileName}</div>
+          <div class="model-item-dims">
+            ${wCm} × ${hCm} × ${dCm} cm<br>
+            <span style="color:#94a3b8">(${item.width.toFixed(3)}m × ${item.height.toFixed(3)}m × ${item.depth.toFixed(3)}m)</span>
+          </div>
+        `;
+        modelListEl.appendChild(itemDiv);
+      });
+    }
+
+    // --- Responsive Window Resizing ---
+    window.addEventListener('resize', () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+
+    // --- Render Loop ---
+    renderer.setAnimationLoop((timestamp, frame) => {
+      // Update laser hover state when not holding an object
+      if (renderer.xr.isPresenting && !grabbedObject) {
+        controllers.forEach(controller => {
+          const hovered = getIntersectedModelGroup(controller);
+          const laser = controller.getObjectByName('laser');
+          if (laser) {
+            laser.material.color.setHex(hovered ? 0x60a5fa : 0x3b82f6);
+          }
+        });
+      }
+
+      if (!renderer.xr.isPresenting) {
+        controls.update();
+      }
+
+      renderer.render(scene, camera);
+    });
+  </script>
+</body>
+</html>
