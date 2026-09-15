@@ -1,5 +1,11 @@
+# Binaries and logs
 cloudflared.exe
 ngrok.zip
 tunnel.log
+*.log
+
+# Editor & local files
 .vscode/
 .gemini/
+*~
+*.swp
