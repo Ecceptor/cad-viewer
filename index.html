@@ -81,10 +81,10 @@
           Environment Lighting
         </div>
         <select id="envSelect" class="env-select" title="Choose environment reflections & lighting">
+          <option value="environments/interior.exr" selected>Interior Room (EXR)</option>
           <option value="default">Default Studio (Neutral)</option>
           <option value="environments/studio.exr">Studio Neutral (EXR)</option>
           <option value="environments/studio_small_09_1k.hdr">Studio Softbox (1k HDR)</option>
-          <option value="environments/interior.exr">Interior Room (EXR)</option>
           <option value="environments/courtyard.exr">Courtyard (EXR)</option>
           <option value="environments/city.exr">City Urban (EXR)</option>
           <option value="environments/forest.exr">Forest Outdoor (EXR)</option>
@@ -308,7 +308,7 @@
 
     let currentRenderTarget = null;
     let currentEnvTexture = null;
-    let lastNonCustomEnv = 'default';
+    let lastNonCustomEnv = 'environments/interior.exr';
 
     const envSelect = document.getElementById('envSelect');
     const envFileInput = document.getElementById('envFileInput');
@@ -452,6 +452,9 @@
         if (typeof renderVRMenuCanvas === 'function') renderVRMenuCanvas();
       });
     }
+
+    // Load default environment map (interior.exr) on startup
+    loadPresetEnvironment('environments/interior.exr');
 
     function loadCustomEnvironmentFile(file) {
       updateStatus(`Parsing ${file.name}...`, 'loading');
