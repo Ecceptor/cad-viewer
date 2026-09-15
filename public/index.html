@@ -11,8 +11,8 @@
   <script type="importmap">
   {
     "imports": {
-      "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
-      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+      "three": "https://cdn.jsdelivr.net/npm/three@0.163.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.163.0/examples/jsm/"
     }
   }
   </script>
@@ -117,6 +117,42 @@
             </button>
           </div>
         </div>
+
+        <!-- Environment Exposure Control -->
+        <div class="slider-control-group">
+          <div class="slider-header">
+            <span class="control-label">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="5"></circle>
+                <line x1="12" y1="1" x2="12" y2="3"></line>
+                <line x1="12" y1="21" x2="12" y2="23"></line>
+                <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+                <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+                <line x1="1" y1="12" x2="3" y2="12"></line>
+                <line x1="21" y1="12" x2="23" y2="12"></line>
+                <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+                <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+              </svg>
+              Exposure
+            </span>
+            <span id="exposureValueLabel" class="slider-value">1.0x</span>
+          </div>
+          <input type="range" id="exposureSlider" min="0.2" max="3.0" step="0.1" value="1.0" class="hud-slider" title="Adjust lighting exposure">
+        </div>
+
+        <!-- Environment Map Rotation Control -->
+        <div class="slider-control-group">
+          <div class="slider-header">
+            <span class="control-label">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/>
+              </svg>
+              Env Rotation
+            </span>
+            <span id="rotValueLabel" class="slider-value">0°</span>
+          </div>
+          <input type="range" id="rotSlider" min="0" max="360" step="1" value="0" class="hud-slider" title="Rotate environment lighting around vertical axis">
+        </div>
       </div>
 
       <!-- Live Status & Physical Dimension Inspector -->
@@ -194,7 +230,7 @@
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.1;
+    renderer.toneMappingExposure = 1.0;
 
     // WebXR Configuration for Meta Quest Browser
     renderer.xr.enabled = true;
@@ -278,6 +314,76 @@
     const envFileInput = document.getElementById('envFileInput');
     const toggleBg360 = document.getElementById('toggleBg360');
 
+    // --- Environment Exposure Controls ---
+    let currentExposure = 1.0;
+    const exposureSlider = document.getElementById('exposureSlider');
+    const exposureValueLabel = document.getElementById('exposureValueLabel');
+
+    function applyExposure() {
+      renderer.toneMappingExposure = currentExposure;
+      if ('environmentIntensity' in scene) {
+        scene.environmentIntensity = currentExposure;
+      }
+    }
+
+    function setExposure(val) {
+      // Clamp between 0.2 and 3.0, rounded to 1 decimal place
+      const clamped = Math.max(0.2, Math.min(3.0, Math.round(val * 10) / 10));
+      currentExposure = clamped;
+      applyExposure();
+
+      if (exposureSlider) exposureSlider.value = currentExposure.toFixed(1);
+      if (exposureValueLabel) exposureValueLabel.textContent = `${currentExposure.toFixed(1)}x`;
+
+      if (typeof renderVRMenuCanvas === 'function') renderVRMenuCanvas();
+    }
+
+    if (exposureSlider) {
+      exposureSlider.addEventListener('input', (e) => {
+        setExposure(parseFloat(e.target.value));
+      });
+    }
+
+    // --- Environment Map Rotation Controls (Zero Re-Baking, Shader/Euler Safe) ---
+    let currentEnvRotationDeg = 0;
+    const rotSlider = document.getElementById('rotSlider');
+    const rotValueLabel = document.getElementById('rotValueLabel');
+
+    function applyEnvRotation() {
+      const rad = THREE.MathUtils.degToRad(currentEnvRotationDeg);
+      if ('environmentRotation' in scene) {
+        scene.environmentRotation.set(0, rad, 0);
+      }
+      if ('backgroundRotation' in scene) {
+        scene.backgroundRotation.set(0, rad, 0);
+      }
+      if (currentEnvTexture) {
+        currentEnvTexture.rotation = rad;
+        currentEnvTexture.center.set(0.5, 0.5);
+      }
+      if (currentRenderTarget && currentRenderTarget.texture) {
+        currentRenderTarget.texture.rotation = rad;
+        currentRenderTarget.texture.center.set(0.5, 0.5);
+      }
+    }
+
+    function setEnvRotation(deg) {
+      const normalized = ((Math.round(deg) % 360) + 360) % 360;
+      currentEnvRotationDeg = normalized;
+      applyEnvRotation();
+
+      if (rotSlider) rotSlider.value = currentEnvRotationDeg;
+      if (rotValueLabel) rotValueLabel.textContent = `${currentEnvRotationDeg}°`;
+
+      if (typeof renderVRMenuCanvas === 'function') renderVRMenuCanvas();
+    }
+
+    if (rotSlider) {
+      rotSlider.addEventListener('input', (e) => {
+        setEnvRotation(parseFloat(e.target.value));
+      });
+    }
+
     function cleanupEnvironment() {
       if (currentRenderTarget) {
         currentRenderTarget.dispose();
@@ -296,6 +402,8 @@
       currentRenderTarget = pmremGenerator.fromEquirectangular(texture);
 
       scene.environment = currentRenderTarget.texture;
+      applyExposure();
+      applyEnvRotation();
       updateBackgroundVisibility();
     }
 
@@ -303,6 +411,7 @@
       cleanupEnvironment();
       scene.environment = null;
       scene.background = new THREE.Color(currentBgColorHex);
+      applyExposure();
       if (typeof renderVRMenuCanvas === 'function') renderVRMenuCanvas();
     }
 
@@ -312,6 +421,7 @@
       } else {
         scene.background = new THREE.Color(currentBgColorHex);
       }
+      applyEnvRotation();
       if (typeof renderVRMenuCanvas === 'function') renderVRMenuCanvas();
     }
 
@@ -424,10 +534,10 @@
     let isVRMenuMinimized = false;
     let isPillHovered = false;
 
-    // 1. Full VR Menu Canvas (512x720)
+    // 1. Full VR Menu Canvas (512x820)
     const vrCanvas = document.createElement('canvas');
     vrCanvas.width = 512;
-    vrCanvas.height = 720;
+    vrCanvas.height = 820;
     const vrCtx = vrCanvas.getContext('2d');
 
     const vrCanvasTexture = new THREE.CanvasTexture(vrCanvas);
@@ -476,7 +586,7 @@
         id: 'bgDark',
         title: 'Dark Grey',
         colorHex: 0x161616,
-        x: 26, y: 122, w: 224, h: 56,
+        x: 26, y: 120, w: 224, h: 50,
         accent: '#3b82f6',
         hoverAccent: '#60a5fa'
       },
@@ -484,16 +594,46 @@
         id: 'bgLight',
         title: 'Light Grey',
         colorHex: 0xaaaaaa,
-        x: 262, y: 122, w: 224, h: 56,
+        x: 262, y: 120, w: 224, h: 50,
         accent: '#3b82f6',
         hoverAccent: '#60a5fa'
       },
-      // 3 to 7: Actions
+      // 3 & 4: Stepped Exposure Controls
+      {
+        id: 'expMinus',
+        title: '– 0.2',
+        x: 26, y: 202, w: 84, h: 50,
+        accent: '#38bdf8',
+        hoverAccent: '#7dd3fc'
+      },
+      {
+        id: 'expPlus',
+        title: '+ 0.2',
+        x: 402, y: 202, w: 84, h: 50,
+        accent: '#38bdf8',
+        hoverAccent: '#7dd3fc'
+      },
+      // 5 & 6: Stepped Rotation Controls
+      {
+        id: 'rotMinus',
+        title: '⟲ -15°',
+        x: 26, y: 284, w: 100, h: 50,
+        accent: '#818cf8',
+        hoverAccent: '#a5b4fc'
+      },
+      {
+        id: 'rotPlus',
+        title: '+15° ⟳',
+        x: 386, y: 284, w: 100, h: 50,
+        accent: '#818cf8',
+        hoverAccent: '#a5b4fc'
+      },
+      // 7 to 11: Main Action Buttons
       {
         id: 'reset',
         title: 'Reset Layout',
         sub: () => 'Snap models flush to floor (y=0)',
-        x: 26, y: 194, w: 460, h: 68,
+        x: 26, y: 356, w: 460, h: 64,
         accent: '#3b82f6',
         hoverAccent: '#60a5fa'
       },
@@ -501,7 +641,7 @@
         id: 'nextEnv',
         title: 'Next Environment',
         sub: () => `Lighting: ${getCurrentEnvName()}`,
-        x: 26, y: 274, w: 460, h: 68,
+        x: 26, y: 430, w: 460, h: 64,
         accent: '#8b5cf6',
         hoverAccent: '#a78bfa'
       },
@@ -509,7 +649,7 @@
         id: 'toggleBg',
         title: 'Toggle Background',
         sub: () => toggleBg360.checked ? 'Background: 360 Panorama' : (currentBgColorHex === 0x161616 ? 'Solid: Dark Grey' : 'Solid: Light Grey'),
-        x: 26, y: 354, w: 460, h: 68,
+        x: 26, y: 504, w: 460, h: 64,
         accent: '#f59e0b',
         hoverAccent: '#fbbf24'
       },
@@ -517,7 +657,7 @@
         id: 'toggleGrid',
         title: 'Toggle Grid',
         sub: () => studioGrid.visible ? 'Ground Grid: Visible (1m)' : 'Ground Grid: Hidden',
-        x: 26, y: 434, w: 460, h: 68,
+        x: 26, y: 578, w: 460, h: 64,
         accent: '#06b6d4',
         hoverAccent: '#22d3ee'
       },
@@ -525,7 +665,7 @@
         id: 'exitVR',
         title: 'Exit VR',
         sub: () => 'End session & return to browser',
-        x: 26, y: 514, w: 460, h: 68,
+        x: 26, y: 652, w: 460, h: 64,
         accent: '#ef4444',
         hoverAccent: '#f87171'
       }
@@ -634,13 +774,13 @@
       vrCtx.fillText('−', minBtn.x + minBtn.w / 2, minBtn.y + minBtn.h / 2 - 1);
       vrCtx.textBaseline = 'alphabetic';
 
-      // Background Color Section Header
+      // 1. Studio Background Color Section Header
       vrCtx.font = 'bold 11px system-ui, -apple-system, sans-serif';
       vrCtx.fillStyle = '#94a3b8';
       vrCtx.textAlign = 'left';
-      vrCtx.fillText('STUDIO BACKGROUND COLOR', 28, 114);
+      vrCtx.fillText('STUDIO BACKGROUND COLOR', 28, 112);
 
-      // Background Color Buttons (Dark Grey, Light Grey)
+      // Background Color Buttons (Dark Grey, Light Grey - buttons 1 & 2)
       for (let i = 1; i <= 2; i++) {
         const btn = vrButtons[i];
         const isHovered = (hoveredButtonIndex === i);
@@ -657,33 +797,127 @@
 
         // Color Swatch
         vrCtx.fillStyle = (btn.colorHex === 0x161616) ? '#161616' : '#aaaaaa';
-        roundRect(vrCtx, btn.x + 14, btn.y + 14, 28, 28, 6);
+        roundRect(vrCtx, btn.x + 12, btn.y + 11, 28, 28, 6);
         vrCtx.fill();
         vrCtx.lineWidth = 1.5;
         vrCtx.strokeStyle = '#ffffff44';
-        roundRect(vrCtx, btn.x + 14, btn.y + 14, 28, 28, 6);
+        roundRect(vrCtx, btn.x + 12, btn.y + 11, 28, 28, 6);
         vrCtx.stroke();
 
         // Label
         vrCtx.font = 'bold 15px system-ui, -apple-system, sans-serif';
         vrCtx.fillStyle = isActive ? '#ffffff' : '#cbd5e1';
         vrCtx.textAlign = 'left';
-        vrCtx.fillText(btn.title, btn.x + 50, btn.y + 32);
+        vrCtx.fillText(btn.title, btn.x + 48, btn.y + 29);
 
         // Subtext / Active badge
         if (isActive) {
           vrCtx.font = 'bold 10px system-ui, -apple-system, sans-serif';
           vrCtx.fillStyle = '#60a5fa';
-          vrCtx.fillText('● ACTIVE', btn.x + 50, btn.y + 47);
+          vrCtx.fillText('● ACTIVE', btn.x + 48, btn.y + 43);
         } else {
           vrCtx.font = '11px system-ui, -apple-system, sans-serif';
           vrCtx.fillStyle = '#64748b';
-          vrCtx.fillText((btn.colorHex === 0x161616) ? '#161616' : '#AAAAAA', btn.x + 50, btn.y + 47);
+          vrCtx.fillText((btn.colorHex === 0x161616) ? '#161616' : '#AAAAAA', btn.x + 48, btn.y + 43);
         }
       }
 
-      // Action Buttons (buttons 3 to 7)
-      for (let i = 3; i < vrButtons.length; i++) {
+      // 2. Lighting Exposure Section Header
+      vrCtx.font = 'bold 11px system-ui, -apple-system, sans-serif';
+      vrCtx.fillStyle = '#94a3b8';
+      vrCtx.textAlign = 'left';
+      vrCtx.fillText('LIGHTING EXPOSURE (BRIGHTNESS)', 28, 194);
+
+      // Exposure Stepped Buttons (indices 3 & 4)
+      for (const i of [3, 4]) {
+        const btn = vrButtons[i];
+        const isHovered = (hoveredButtonIndex === i);
+        const isClicked = (clickedButtonIndex === i);
+
+        vrCtx.fillStyle = isClicked ? btn.accent : (isHovered ? '#1e293b' : '#131822');
+        roundRect(vrCtx, btn.x, btn.y, btn.w, btn.h, 10);
+        vrCtx.fill();
+
+        vrCtx.lineWidth = isHovered ? 2 : 1;
+        vrCtx.strokeStyle = isHovered ? btn.hoverAccent : '#232c3d';
+        roundRect(vrCtx, btn.x, btn.y, btn.w, btn.h, 10);
+        vrCtx.stroke();
+
+        vrCtx.font = 'bold 16px system-ui, -apple-system, sans-serif';
+        vrCtx.fillStyle = isClicked ? '#ffffff' : (isHovered ? btn.hoverAccent : '#e2e8f0');
+        vrCtx.textAlign = 'center';
+        vrCtx.textBaseline = 'middle';
+        vrCtx.fillText(btn.title, btn.x + btn.w / 2, btn.y + btn.h / 2);
+        vrCtx.textBaseline = 'alphabetic';
+      }
+
+      // Exposure Center Readout Pill
+      vrCtx.fillStyle = '#131822';
+      roundRect(vrCtx, 118, 202, 276, 50, 10);
+      vrCtx.fill();
+      vrCtx.lineWidth = 1;
+      vrCtx.strokeStyle = '#232c3d';
+      roundRect(vrCtx, 118, 202, 276, 50, 10);
+      vrCtx.stroke();
+
+      vrCtx.font = 'bold 16px system-ui, -apple-system, sans-serif';
+      vrCtx.fillStyle = '#38bdf8';
+      vrCtx.textAlign = 'center';
+      vrCtx.fillText(`Exp: ${currentExposure.toFixed(1)}x`, 118 + 276 / 2, 202 + 25);
+
+      vrCtx.font = '10px system-ui, -apple-system, sans-serif';
+      vrCtx.fillStyle = '#64748b';
+      vrCtx.fillText('Range: 0.2x – 3.0x (±0.2)', 118 + 276 / 2, 202 + 41);
+
+      // 3. Environment Rotation Section Header
+      vrCtx.font = 'bold 11px system-ui, -apple-system, sans-serif';
+      vrCtx.fillStyle = '#94a3b8';
+      vrCtx.textAlign = 'left';
+      vrCtx.fillText('ENVIRONMENT ROTATION (Y-AXIS)', 28, 276);
+
+      // Rotation Stepped Buttons (indices 5 & 6)
+      for (const i of [5, 6]) {
+        const btn = vrButtons[i];
+        const isHovered = (hoveredButtonIndex === i);
+        const isClicked = (clickedButtonIndex === i);
+
+        vrCtx.fillStyle = isClicked ? btn.accent : (isHovered ? '#1e293b' : '#131822');
+        roundRect(vrCtx, btn.x, btn.y, btn.w, btn.h, 10);
+        vrCtx.fill();
+
+        vrCtx.lineWidth = isHovered ? 2 : 1;
+        vrCtx.strokeStyle = isHovered ? btn.hoverAccent : '#232c3d';
+        roundRect(vrCtx, btn.x, btn.y, btn.w, btn.h, 10);
+        vrCtx.stroke();
+
+        vrCtx.font = 'bold 16px system-ui, -apple-system, sans-serif';
+        vrCtx.fillStyle = isClicked ? '#ffffff' : (isHovered ? btn.hoverAccent : '#e2e8f0');
+        vrCtx.textAlign = 'center';
+        vrCtx.textBaseline = 'middle';
+        vrCtx.fillText(btn.title, btn.x + btn.w / 2, btn.y + btn.h / 2);
+        vrCtx.textBaseline = 'alphabetic';
+      }
+
+      // Rotation Center Readout Pill
+      vrCtx.fillStyle = '#131822';
+      roundRect(vrCtx, 134, 284, 244, 50, 10);
+      vrCtx.fill();
+      vrCtx.lineWidth = 1;
+      vrCtx.strokeStyle = '#232c3d';
+      roundRect(vrCtx, 134, 284, 244, 50, 10);
+      vrCtx.stroke();
+
+      vrCtx.font = 'bold 16px system-ui, -apple-system, sans-serif';
+      vrCtx.fillStyle = '#818cf8';
+      vrCtx.textAlign = 'center';
+      vrCtx.fillText(`Rot: ${currentEnvRotationDeg}°`, 134 + 244 / 2, 284 + 25);
+
+      vrCtx.font = '10px system-ui, -apple-system, sans-serif';
+      vrCtx.fillStyle = '#64748b';
+      vrCtx.fillText('Range: 0° – 360° (±15°)', 134 + 244 / 2, 284 + 41);
+
+      // 4. Main Action Buttons (buttons 7 to 11)
+      for (let i = 7; i < vrButtons.length; i++) {
         const btn = vrButtons[i];
         const isHovered = (hoveredButtonIndex === i);
         const isClicked = (clickedButtonIndex === i);
@@ -732,18 +966,18 @@
       vrCtx.font = '11px system-ui, -apple-system, sans-serif';
       vrCtx.fillStyle = '#94a3b8';
       vrCtx.textAlign = 'center';
-      vrCtx.fillText('Press [B] or [Y] on controller to toggle menu visibility', w / 2, 674);
+      vrCtx.fillText('Press [B] or [Y] on controller to toggle menu visibility', w / 2, 754);
 
       vrCtx.font = '11px system-ui, -apple-system, sans-serif';
       vrCtx.fillStyle = '#64748b';
-      vrCtx.fillText('Aim laser pointer & pull trigger to interact', w / 2, 694);
+      vrCtx.fillText('Aim laser pointer & pull trigger to interact', w / 2, 778);
 
       vrCanvasTexture.needsUpdate = true;
     }
 
     // 3D Meshes for Floating Tablet & Minimized Pill
-    // Full Menu Mesh & Bezel
-    const vrMenuGeo = new THREE.PlaneGeometry(0.36, 0.506);
+    // Full Menu Mesh & Bezel (Aspect ratio: 820 / 512 = 1.60156 -> 0.36m x 0.5765m)
+    const vrMenuGeo = new THREE.PlaneGeometry(0.36, 0.5765);
     const vrMenuMat = new THREE.MeshBasicMaterial({
       map: vrCanvasTexture,
       transparent: true,
@@ -752,7 +986,7 @@
     const vrMenuMesh = new THREE.Mesh(vrMenuGeo, vrMenuMat);
     vrMenuMesh.name = 'VR_Menu_Screen';
 
-    const bezelGeo = new THREE.BoxGeometry(0.375, 0.521, 0.012);
+    const bezelGeo = new THREE.BoxGeometry(0.375, 0.592, 0.012);
     const bezelMat = new THREE.MeshStandardMaterial({
       color: 0x111317,
       roughness: 0.4,
@@ -1001,6 +1235,30 @@
 
             if (btn.id === 'bgLight') {
               setBackgroundColor(0xaaaaaa);
+              return;
+            }
+
+            if (btn.id === 'expMinus') {
+              flashButtonClicked(menuHover.buttonIndex);
+              setExposure(currentExposure - 0.2);
+              return;
+            }
+
+            if (btn.id === 'expPlus') {
+              flashButtonClicked(menuHover.buttonIndex);
+              setExposure(currentExposure + 0.2);
+              return;
+            }
+
+            if (btn.id === 'rotMinus') {
+              flashButtonClicked(menuHover.buttonIndex);
+              setEnvRotation(currentEnvRotationDeg - 15);
+              return;
+            }
+
+            if (btn.id === 'rotPlus') {
+              flashButtonClicked(menuHover.buttonIndex);
+              setEnvRotation(currentEnvRotationDeg + 15);
               return;
             }
 
