@@ -1,5 +1,6 @@
 param(
     [string]$Token,
+    [string]$Message = "Add Environment Lighting selector (HDR/EXR) with PMREM pre-filtering and 360 background toggle",
     [string]$RepoUrl = "https://github.com/Ecceptor/cad-viewer.git"
 )
 
@@ -9,14 +10,26 @@ Write-Host "========================================================" -Foregroun
 Write-Host " Push 1:1 CAD WebXR Viewer to GitHub Pages" -ForegroundColor Green
 Write-Host "========================================================" -ForegroundColor Cyan
 
+# 1. Automatically stage all files
+Write-Host "[1/3] Staging project files..." -ForegroundColor Yellow
+& $git add -A
+
+# 2. Check if there are changes to commit
+$status = (& $git status --porcelain)
+if ($status) {
+    Write-Host "[2/3] Committing changes: '$Message'..." -ForegroundColor Yellow
+    & $git -c user.name="Ecceptor" -c user.email="cad@local.review" commit -m $Message
+} else {
+    Write-Host "[2/3] Working directory clean. Proceeding to push..." -ForegroundColor Gray
+}
+
+# 3. Push to GitHub
+Write-Host "[3/3] Pushing to GitHub repository..." -ForegroundColor Yellow
 if ($Token) {
-    # If token is provided, push using token in URL
     $authUrl = $RepoUrl -replace "https://", "https://$($Token)@"
-    Write-Host "Pushing with provided Personal Access Token to $RepoUrl..." -ForegroundColor Yellow
+    Write-Host "Using provided Personal Access Token..." -ForegroundColor Gray
     & $git push -u $authUrl main
 } else {
-    Write-Host "Pushing using Git Credential Manager / GitHub Desktop credentials..." -ForegroundColor Yellow
-    Write-Host "If prompted, please authorize in your browser or popup window." -ForegroundColor Gray
     & $git push -u origin main
 }
 
@@ -26,11 +39,10 @@ if ($LASTEXITCODE -eq 0) {
     Write-Host "========================================================" -ForegroundColor Green
     Write-Host "Repository:    https://github.com/Ecceptor/cad-viewer" -ForegroundColor Cyan
     Write-Host "GitHub Pages:  https://ecceptor.github.io/cad-viewer/" -ForegroundColor Cyan
-    Write-Host "`nNext Step in GitHub (if not already enabled):" -ForegroundColor Yellow
-    Write-Host "  1. Go to https://github.com/Ecceptor/cad-viewer/settings/pages" -ForegroundColor White
-    Write-Host "  2. Under 'Build and deployment > Source', choose:" -ForegroundColor White
-    Write-Host "     - 'GitHub Actions' (Workflow will automatically deploy), OR" -ForegroundColor White
-    Write-Host "     - 'Deploy from a branch' -> branch: main -> folder: / (root) -> Save" -ForegroundColor White
-    Write-Host "`nYour viewer will be live at: https://ecceptor.github.io/cad-viewer/" -ForegroundColor Green
-    Write-Host "Open that link directly in your Meta Quest Browser!" -ForegroundColor Green
+    Write-Host "`nYour viewer will automatically update at:" -ForegroundColor Yellow
+    Write-Host "  https://ecceptor.github.io/cad-viewer/" -ForegroundColor Green
+    Write-Host "Open this URL in your Meta Quest Browser (Quest 2/3)!" -ForegroundColor Green
+} else {
+    Write-Warning "Push failed or requires authorization."
+    Write-Host "You can also push directly using GitHub Desktop by clicking 'Push origin'." -ForegroundColor Yellow
 }

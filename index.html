@@ -83,6 +83,41 @@
         </button>
       </div>
 
+      <!-- Environment Lighting Controls -->
+      <div class="env-control-group">
+        <div class="control-label">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="5"></circle>
+            <line x1="12" y1="1" x2="12" y2="3"></line>
+            <line x1="12" y1="21" x2="12" y2="23"></line>
+            <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+            <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+            <line x1="1" y1="12" x2="3" y2="12"></line>
+            <line x1="21" y1="12" x2="23" y2="12"></line>
+            <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+            <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+          </svg>
+          Environment Lighting
+        </div>
+        <select id="envSelect" class="env-select" title="Choose environment reflections & lighting">
+          <option value="default">Default Studio (Neutral)</option>
+          <option value="environments/studio.exr">Studio Neutral (EXR)</option>
+          <option value="environments/studio_small_09_1k.hdr">Studio Softbox (1k HDR)</option>
+          <option value="environments/interior.exr">Interior Room (EXR)</option>
+          <option value="environments/courtyard.exr">Courtyard (EXR)</option>
+          <option value="environments/city.exr">City Urban (EXR)</option>
+          <option value="environments/forest.exr">Forest Outdoor (EXR)</option>
+          <option value="environments/sunrise.exr">Sunrise Warm (EXR)</option>
+          <option value="environments/sunset.exr">Sunset Golden (EXR)</option>
+          <option value="environments/night.exr">Night Sky (EXR)</option>
+          <option value="custom">Load Custom EXR/HDR...</option>
+        </select>
+        <label class="checkbox-row" title="Display 360 panorama in background, or keep neutral dark studio background">
+          <input type="checkbox" id="toggleBg360">
+          <span>Show Background 360</span>
+        </label>
+      </div>
+
       <!-- Live Status & Physical Dimension Inspector -->
       <div class="status-card">
         <div class="status-row">
@@ -109,6 +144,7 @@
 
   <!-- Hidden HTML File Input for in-memory loading -->
   <input type="file" id="fileInput" accept=".glb" multiple style="display: none;">
+  <input type="file" id="envFileInput" accept=".hdr,.exr" style="display: none;">
 
   <!-- Fullscreen Drag & Drop Zone -->
   <div id="drop-zone">
@@ -125,6 +161,8 @@
   <script type="module">
     import * as THREE from 'three';
     import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+    import { RGBELoader } from 'three/addons/loaders/RGBELoader.js';
+    import { EXRLoader } from 'three/addons/loaders/EXRLoader.js';
     import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
     import { VRButton } from 'three/addons/webxr/VRButton.js';
     import { XRControllerModelFactory } from 'three/addons/webxr/XRControllerModelFactory.js';
@@ -248,6 +286,134 @@
     const topLight = new THREE.DirectionalLight(0xffffff, 0.8);
     topLight.position.set(0, 6, -1.5);
     scene.add(topLight);
+
+    // --- Environment Lighting & PMREM Generator (Quest 2/3 Optimized) ---
+    const pmremGenerator = new THREE.PMREMGenerator(renderer);
+    pmremGenerator.compileEquirectangularShader();
+
+    let currentRenderTarget = null;
+    let currentEnvTexture = null;
+    let lastNonCustomEnv = 'default';
+
+    const envSelect = document.getElementById('envSelect');
+    const envFileInput = document.getElementById('envFileInput');
+    const toggleBg360 = document.getElementById('toggleBg360');
+
+    function cleanupEnvironment() {
+      if (currentRenderTarget) {
+        currentRenderTarget.dispose();
+        currentRenderTarget = null;
+      }
+      if (currentEnvTexture) {
+        currentEnvTexture.dispose();
+        currentEnvTexture = null;
+      }
+    }
+
+    function setEnvironmentFromTexture(texture) {
+      cleanupEnvironment();
+      texture.mapping = THREE.EquirectangularReflectionMapping;
+      currentEnvTexture = texture;
+      currentRenderTarget = pmremGenerator.fromEquirectangular(texture);
+
+      scene.environment = currentRenderTarget.texture;
+      updateBackgroundVisibility();
+    }
+
+    function setDefaultStudioEnvironment() {
+      cleanupEnvironment();
+      scene.environment = null;
+      scene.background = new THREE.Color(0x161616);
+    }
+
+    function updateBackgroundVisibility() {
+      if (toggleBg360.checked && currentRenderTarget) {
+        scene.background = currentRenderTarget.texture;
+      } else {
+        scene.background = new THREE.Color(0x161616);
+      }
+    }
+
+    function loadPresetEnvironment(url) {
+      if (url === 'default') {
+        setDefaultStudioEnvironment();
+        lastNonCustomEnv = 'default';
+        updateStatus('Default Studio environment active', 'ready');
+        return;
+      }
+
+      updateStatus('Loading environment map...', 'loading');
+      const isExr = url.toLowerCase().endsWith('.exr');
+      const loader = isExr ? new EXRLoader() : new RGBELoader();
+
+      loader.load(url, (texture) => {
+        setEnvironmentFromTexture(texture);
+        lastNonCustomEnv = url;
+        updateStatus('Environment lighting active', 'ready');
+      }, undefined, (err) => {
+        console.error('Error loading environment map:', err);
+        updateStatus('Failed to load environment map', 'error');
+        setDefaultStudioEnvironment();
+        envSelect.value = 'default';
+        lastNonCustomEnv = 'default';
+      });
+    }
+
+    function loadCustomEnvironmentFile(file) {
+      updateStatus(`Parsing ${file.name}...`, 'loading');
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        try {
+          const arrayBuffer = e.target.result;
+          const isExr = file.name.toLowerCase().endsWith('.exr');
+          const loader = isExr ? new EXRLoader() : new RGBELoader();
+          const texture = loader.parse(arrayBuffer);
+          setEnvironmentFromTexture(texture);
+
+          // Update or add custom option to select dropdown
+          let customOpt = envSelect.querySelector('option[data-custom="true"]');
+          if (!customOpt) {
+            customOpt = document.createElement('option');
+            customOpt.setAttribute('data-custom', 'true');
+            envSelect.insertBefore(customOpt, envSelect.querySelector('option[value="custom"]'));
+          }
+          customOpt.value = 'custom-loaded';
+          customOpt.textContent = `Custom: ${file.name}`;
+          envSelect.value = 'custom-loaded';
+
+          updateStatus(`Custom lighting: ${file.name}`, 'ready');
+        } catch (err) {
+          console.error("Error parsing custom environment:", err);
+          updateStatus('Error parsing custom HDR/EXR', 'error');
+          envSelect.value = lastNonCustomEnv;
+        }
+      };
+      reader.readAsArrayBuffer(file);
+    }
+
+    envSelect.addEventListener('change', (e) => {
+      const val = e.target.value;
+      if (val === 'custom') {
+        envFileInput.click();
+      } else if (val === 'custom-loaded') {
+        // Keep current custom environment active
+      } else {
+        loadPresetEnvironment(val);
+      }
+    });
+
+    envFileInput.addEventListener('change', (e) => {
+      if (e.target.files && e.target.files[0]) {
+        loadCustomEnvironmentFile(e.target.files[0]);
+      } else {
+        envSelect.value = lastNonCustomEnv;
+      }
+      envFileInput.value = '';
+    });
+
+    toggleBg360.addEventListener('change', () => {
+      updateBackgroundVisibility();
+    });
 
     // --- WebXR Quest Controller Interaction (6DOF Grab & Laser) ---
     const controllerModelFactory = new XRControllerModelFactory();
