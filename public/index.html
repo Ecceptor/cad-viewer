@@ -18,25 +18,6 @@
   </script>
 </head>
 <body>
-  <!-- Authentication Gatekeeper for GitHub Pages -->
-  <div id="auth-modal">
-    <div class="auth-card">
-      <div class="auth-icon">
-        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
-          <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
-        </svg>
-      </div>
-      <div class="auth-title">Confidential CAD Studio</div>
-      <div class="auth-subtitle">1:1 Physical Scale WebXR Product Review.<br>Enter authorization password to unlock.</div>
-      <div class="auth-input-group">
-        <input type="password" id="authPassword" class="auth-input" placeholder="Password (default: CadVR2026!)" autofocus>
-        <button id="btnUnlock" class="auth-btn">Unlock Studio</button>
-        <div id="authError" class="auth-error"></div>
-      </div>
-    </div>
-  </div>
-
   <!-- 3D WebGL / WebXR Viewport -->
   <div id="canvas-container"></div>
 
@@ -171,42 +152,6 @@
     const loadedItems = []; // Array of { id, group, model, fileName, dimensions, nativeBox }
     let isUserInteractingXR = false;
 
-    // --- Authentication Gatekeeper (SHA-256 Client-Side Protection for GitHub Pages) ---
-    // Default password: CadVR2026!
-    const AUTH_HASH = "8bac064ebb26ba31989c7f7843fc0d2e9d7125e166e7716bde3f4cf23697366c";
-    const authModal = document.getElementById('auth-modal');
-    const authPassword = document.getElementById('authPassword');
-    const btnUnlock = document.getElementById('btnUnlock');
-    const authError = document.getElementById('authError');
-
-    async function checkPassword() {
-      const val = authPassword.value;
-      if (!val) return;
-      const msgUint8 = new TextEncoder().encode(val);
-      const hashBuffer = await crypto.subtle.digest('SHA-256', msgUint8);
-      const hashArray = Array.from(new Uint8Array(hashBuffer));
-      const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-
-      if (hashHex === AUTH_HASH) {
-        sessionStorage.setItem('cad_viewer_auth', 'granted');
-        authModal.classList.add('hidden');
-        authError.textContent = '';
-      } else {
-        authError.textContent = 'Invalid password. Access denied.';
-        authPassword.value = '';
-        authPassword.focus();
-      }
-    }
-
-    if (sessionStorage.getItem('cad_viewer_auth') === 'granted') {
-      authModal.classList.add('hidden');
-    }
-
-    btnUnlock.addEventListener('click', checkPassword);
-    authPassword.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') checkPassword();
-    });
-
     // --- Scene Setup ---
     const container = document.getElementById('canvas-container');
     const scene = new THREE.Scene();
@@ -248,7 +193,6 @@
       controls.enabled = false;
       document.getElementById('ui-overlay').style.display = 'none';
       document.getElementById('desktop-hint').style.display = 'none';
-      authModal.style.display = 'none';
     });
     renderer.xr.addEventListener('sessionend', () => {
       controls.enabled = true;
