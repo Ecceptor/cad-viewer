@@ -93,10 +93,30 @@
           <option value="environments/night.exr">Night Sky (EXR)</option>
           <option value="custom">Load Custom EXR/HDR...</option>
         </select>
-        <label class="checkbox-row" title="Display 360 panorama in background, or keep neutral dark studio background">
+        <label class="checkbox-row" title="Display 360 panorama in background, or keep neutral studio background">
           <input type="checkbox" id="toggleBg360">
           <span>Show Background 360</span>
         </label>
+
+        <!-- Background Color Selector -->
+        <div class="bg-color-group">
+          <div class="control-label">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+              <circle cx="8.5" cy="8.5" r="1.5"></circle>
+              <polyline points="21 15 16 10 5 21"></polyline>
+            </svg>
+            Background Color
+          </div>
+          <div class="segmented-control" id="bgColorSegmented">
+            <button type="button" id="btnBgDark" class="seg-btn active" title="Switch to Dark Grey (#161616)">
+              <span class="color-swatch swatch-dark"></span> Dark Grey
+            </button>
+            <button type="button" id="btnBgLight" class="seg-btn" title="Switch to Light Grey (#AAAAAA)">
+              <span class="color-swatch swatch-light"></span> Light Grey
+            </button>
+          </div>
+        </div>
       </div>
 
       <!-- Live Status & Physical Dimension Inspector -->
@@ -156,30 +176,9 @@
     const container = document.getElementById('canvas-container');
     const scene = new THREE.Scene();
 
-    // --- 2-Color Studio Cyc Backdrop (Grey / Light Grey Equirectangular Panorama) ---
-    function createStudioBackdropTexture() {
-      const canvas = document.createElement('canvas');
-      canvas.width = 1024;
-      canvas.height = 512;
-      const ctx = canvas.getContext('2d');
-
-      // Studio Cyclorama vertical gradient: Light grey dome to deep neutral studio floor
-      const grad = ctx.createLinearGradient(0, 0, 0, canvas.height);
-      grad.addColorStop(0.0, '#585b63');   // Light grey dome ceiling
-      grad.addColorStop(0.35, '#3e4149');  // Mid-upper soft blend
-      grad.addColorStop(0.55, '#282a30');  // Studio horizon transition
-      grad.addColorStop(1.0, '#151619');   // Deep studio floor
-      ctx.fillStyle = grad;
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-      const texture = new THREE.CanvasTexture(canvas);
-      texture.mapping = THREE.EquirectangularReflectionMapping;
-      texture.colorSpace = THREE.SRGBColorSpace;
-      return texture;
-    }
-
-    const studioBackdropTexture = createStudioBackdropTexture();
-    scene.background = studioBackdropTexture;
+    // --- Studio Background Color (Dark Grey #161616 Default, Light Grey #AAAAAA) ---
+    let currentBgColorHex = 0x161616;
+    scene.background = new THREE.Color(currentBgColorHex);
 
     // Camera (Eye height in meters: 1.6m default standing height)
     const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.01, 100);
@@ -219,6 +218,9 @@
       document.getElementById('desktop-hint').style.display = 'none';
       if (typeof tabletGroup !== 'undefined' && tabletGroup) {
         tabletGroup.visible = true;
+        isVRMenuMinimized = false;
+        if (typeof fullMenuContainer !== 'undefined') fullMenuContainer.visible = true;
+        if (typeof minimizedPillContainer !== 'undefined') minimizedPillContainer.visible = false;
         if (typeof renderVRMenuCanvas === 'function') renderVRMenuCanvas();
       }
     });
@@ -229,6 +231,7 @@
       if (typeof tabletGroup !== 'undefined' && tabletGroup) {
         tabletGroup.visible = false;
         hoveredButtonIndex = -1;
+        isPillHovered = false;
       }
     });
 
@@ -299,7 +302,7 @@
     function setDefaultStudioEnvironment() {
       cleanupEnvironment();
       scene.environment = null;
-      scene.background = studioBackdropTexture;
+      scene.background = new THREE.Color(currentBgColorHex);
       if (typeof renderVRMenuCanvas === 'function') renderVRMenuCanvas();
     }
 
@@ -307,7 +310,7 @@
       if (toggleBg360.checked && currentRenderTarget) {
         scene.background = currentRenderTarget.texture;
       } else {
-        scene.background = studioBackdropTexture;
+        scene.background = new THREE.Color(currentBgColorHex);
       }
       if (typeof renderVRMenuCanvas === 'function') renderVRMenuCanvas();
     }
@@ -396,14 +399,48 @@
       updateBackgroundVisibility();
     });
 
-    // --- In-VR 3D Floating Tablet Menu ---
+    // --- 2D Background Color Controls ---
+    const btnBgDark = document.getElementById('btnBgDark');
+    const btnBgLight = document.getElementById('btnBgLight');
+
+    function setBackgroundColor(colorHex) {
+      currentBgColorHex = colorHex;
+      if (toggleBg360.checked) {
+        toggleBg360.checked = false;
+      }
+      scene.background = new THREE.Color(currentBgColorHex);
+
+      const isDark = (currentBgColorHex === 0x161616);
+      btnBgDark.classList.toggle('active', isDark);
+      btnBgLight.classList.toggle('active', !isDark);
+
+      if (typeof renderVRMenuCanvas === 'function') renderVRMenuCanvas();
+    }
+
+    btnBgDark.addEventListener('click', () => setBackgroundColor(0x161616));
+    btnBgLight.addEventListener('click', () => setBackgroundColor(0xaaaaaa));
+
+    // --- In-VR 3D Floating Tablet Menu & Minimized Pill ---
+    let isVRMenuMinimized = false;
+    let isPillHovered = false;
+
+    // 1. Full VR Menu Canvas (512x720)
     const vrCanvas = document.createElement('canvas');
     vrCanvas.width = 512;
-    vrCanvas.height = 640;
+    vrCanvas.height = 720;
     const vrCtx = vrCanvas.getContext('2d');
 
     const vrCanvasTexture = new THREE.CanvasTexture(vrCanvas);
     vrCanvasTexture.colorSpace = THREE.SRGBColorSpace;
+
+    // 2. Minimized Pill Canvas (256x88)
+    const pillCanvas = document.createElement('canvas');
+    pillCanvas.width = 256;
+    pillCanvas.height = 88;
+    const pillCtx = pillCanvas.getContext('2d');
+
+    const pillCanvasTexture = new THREE.CanvasTexture(pillCanvas);
+    pillCanvasTexture.colorSpace = THREE.SRGBColorSpace;
 
     // Helper for rounded rectangles on canvas
     function roundRect(ctx, x, y, width, height, radius) {
@@ -426,11 +463,37 @@
     }
 
     const vrButtons = [
+      // 0: Minimize Button [-] in Header
+      {
+        id: 'minimize',
+        title: 'Minimize',
+        x: 450, y: 22, w: 42, h: 42,
+        accent: '#38bdf8',
+        hoverAccent: '#7dd3fc'
+      },
+      // 1 & 2: Background Colors
+      {
+        id: 'bgDark',
+        title: 'Dark Grey',
+        colorHex: 0x161616,
+        x: 26, y: 122, w: 224, h: 56,
+        accent: '#3b82f6',
+        hoverAccent: '#60a5fa'
+      },
+      {
+        id: 'bgLight',
+        title: 'Light Grey',
+        colorHex: 0xaaaaaa,
+        x: 262, y: 122, w: 224, h: 56,
+        accent: '#3b82f6',
+        hoverAccent: '#60a5fa'
+      },
+      // 3 to 7: Actions
       {
         id: 'reset',
         title: 'Reset Layout',
         sub: () => 'Snap models flush to floor (y=0)',
-        x: 26, y: 110, w: 460, h: 80,
+        x: 26, y: 194, w: 460, h: 68,
         accent: '#3b82f6',
         hoverAccent: '#60a5fa'
       },
@@ -438,15 +501,15 @@
         id: 'nextEnv',
         title: 'Next Environment',
         sub: () => `Lighting: ${getCurrentEnvName()}`,
-        x: 26, y: 204, w: 460, h: 80,
+        x: 26, y: 274, w: 460, h: 68,
         accent: '#8b5cf6',
         hoverAccent: '#a78bfa'
       },
       {
         id: 'toggleBg',
         title: 'Toggle Background',
-        sub: () => toggleBg360.checked ? 'Background: 360 Panorama' : 'Background: 2-Color Studio Cyc',
-        x: 26, y: 298, w: 460, h: 80,
+        sub: () => toggleBg360.checked ? 'Background: 360 Panorama' : (currentBgColorHex === 0x161616 ? 'Solid: Dark Grey' : 'Solid: Light Grey'),
+        x: 26, y: 354, w: 460, h: 68,
         accent: '#f59e0b',
         hoverAccent: '#fbbf24'
       },
@@ -454,7 +517,7 @@
         id: 'toggleGrid',
         title: 'Toggle Grid',
         sub: () => studioGrid.visible ? 'Ground Grid: Visible (1m)' : 'Ground Grid: Hidden',
-        x: 26, y: 392, w: 460, h: 80,
+        x: 26, y: 434, w: 460, h: 68,
         accent: '#06b6d4',
         hoverAccent: '#22d3ee'
       },
@@ -462,7 +525,7 @@
         id: 'exitVR',
         title: 'Exit VR',
         sub: () => 'End session & return to browser',
-        x: 26, y: 486, w: 460, h: 80,
+        x: 26, y: 514, w: 460, h: 68,
         accent: '#ef4444',
         hoverAccent: '#f87171'
       }
@@ -470,6 +533,51 @@
 
     let hoveredButtonIndex = -1;
     let clickedButtonIndex = -1;
+
+    function renderPillCanvas(isHovered = false) {
+      const w = pillCanvas.width;
+      const h = pillCanvas.height;
+
+      pillCtx.clearRect(0, 0, w, h);
+
+      // Capsule Background
+      pillCtx.fillStyle = isHovered ? '#1e293b' : '#0f131a';
+      roundRect(pillCtx, 2, 2, w - 4, h - 4, 38);
+      pillCtx.fill();
+
+      // Border
+      pillCtx.lineWidth = isHovered ? 4 : 2;
+      pillCtx.strokeStyle = isHovered ? '#38bdf8' : '#252e3d';
+      roundRect(pillCtx, 2, 2, w - 4, h - 4, 38);
+      pillCtx.stroke();
+
+      // Plus icon circle
+      pillCtx.fillStyle = isHovered ? '#0284c7' : '#2563eb';
+      pillCtx.beginPath();
+      pillCtx.arc(42, h / 2, 20, 0, Math.PI * 2);
+      pillCtx.fill();
+
+      // Plus sign
+      pillCtx.fillStyle = '#ffffff';
+      pillCtx.font = 'bold 24px system-ui, sans-serif';
+      pillCtx.textAlign = 'center';
+      pillCtx.textBaseline = 'middle';
+      pillCtx.fillText('+', 42, h / 2);
+
+      // Label
+      pillCtx.font = 'bold 22px system-ui, -apple-system, sans-serif';
+      pillCtx.fillStyle = isHovered ? '#7dd3fc' : '#f8fafc';
+      pillCtx.textAlign = 'left';
+      pillCtx.fillText('Menu', 76, h / 2 + 1);
+
+      // Status dot (green)
+      pillCtx.fillStyle = '#10b981';
+      pillCtx.beginPath();
+      pillCtx.arc(w - 32, h / 2, 6, 0, Math.PI * 2);
+      pillCtx.fill();
+
+      pillCanvasTexture.needsUpdate = true;
+    }
 
     function renderVRMenuCanvas() {
       const w = vrCanvas.width;
@@ -488,28 +596,94 @@
 
       // Header Zone
       vrCtx.fillStyle = '#161c26';
-      roundRect(vrCtx, 16, 16, w - 32, 76, 16);
+      roundRect(vrCtx, 16, 16, w - 32, 72, 16);
       vrCtx.fill();
 
       // Brand Title
-      vrCtx.font = 'bold 22px system-ui, -apple-system, sans-serif';
+      vrCtx.font = 'bold 20px system-ui, -apple-system, sans-serif';
       vrCtx.fillStyle = '#60a5fa';
       vrCtx.textAlign = 'left';
-      vrCtx.fillText('CAD VR STUDIO', 36, 48);
+      vrCtx.textBaseline = 'alphabetic';
+      vrCtx.fillText('CAD VR STUDIO', 32, 44);
 
       // 1:1 Tag
       vrCtx.font = 'bold 11px system-ui, -apple-system, sans-serif';
       vrCtx.fillStyle = '#10b981';
-      vrCtx.fillText('STRICT 1:1 PHYSICAL SCALE', 36, 70);
+      vrCtx.fillText('STRICT 1:1 PHYSICAL SCALE', 32, 66);
 
       // Model Counter
-      vrCtx.font = '13px system-ui, -apple-system, sans-serif';
+      vrCtx.font = '12px system-ui, -apple-system, sans-serif';
       vrCtx.fillStyle = '#94a3b8';
       vrCtx.textAlign = 'right';
-      vrCtx.fillText(`${loadedItems.length} Model${loadedItems.length === 1 ? '' : 's'} Active`, w - 36, 56);
+      vrCtx.fillText(`${loadedItems.length} Model${loadedItems.length === 1 ? '' : 's'}`, 434, 52);
 
-      // 5 Buttons
-      for (let i = 0; i < vrButtons.length; i++) {
+      // Minimize Button [-] at top-right
+      const minBtn = vrButtons[0];
+      const isMinHovered = (hoveredButtonIndex === 0);
+      vrCtx.fillStyle = isMinHovered ? '#334155' : '#1e293b';
+      roundRect(vrCtx, minBtn.x, minBtn.y, minBtn.w, minBtn.h, 10);
+      vrCtx.fill();
+      vrCtx.lineWidth = isMinHovered ? 2.5 : 1;
+      vrCtx.strokeStyle = isMinHovered ? '#38bdf8' : '#475569';
+      roundRect(vrCtx, minBtn.x, minBtn.y, minBtn.w, minBtn.h, 10);
+      vrCtx.stroke();
+      vrCtx.font = 'bold 24px system-ui, sans-serif';
+      vrCtx.fillStyle = isMinHovered ? '#38bdf8' : '#e2e8f0';
+      vrCtx.textAlign = 'center';
+      vrCtx.textBaseline = 'middle';
+      vrCtx.fillText('−', minBtn.x + minBtn.w / 2, minBtn.y + minBtn.h / 2 - 1);
+      vrCtx.textBaseline = 'alphabetic';
+
+      // Background Color Section Header
+      vrCtx.font = 'bold 11px system-ui, -apple-system, sans-serif';
+      vrCtx.fillStyle = '#94a3b8';
+      vrCtx.textAlign = 'left';
+      vrCtx.fillText('STUDIO BACKGROUND COLOR', 28, 114);
+
+      // Background Color Buttons (Dark Grey, Light Grey)
+      for (let i = 1; i <= 2; i++) {
+        const btn = vrButtons[i];
+        const isHovered = (hoveredButtonIndex === i);
+        const isActive = (currentBgColorHex === btn.colorHex);
+
+        vrCtx.fillStyle = isActive ? (isHovered ? '#1e2e4a' : '#162238') : (isHovered ? '#1e293b' : '#131822');
+        roundRect(vrCtx, btn.x, btn.y, btn.w, btn.h, 12);
+        vrCtx.fill();
+
+        vrCtx.lineWidth = isActive ? 2.5 : (isHovered ? 2 : 1);
+        vrCtx.strokeStyle = isActive ? '#3b82f6' : (isHovered ? '#64748b' : '#232c3d');
+        roundRect(vrCtx, btn.x, btn.y, btn.w, btn.h, 12);
+        vrCtx.stroke();
+
+        // Color Swatch
+        vrCtx.fillStyle = (btn.colorHex === 0x161616) ? '#161616' : '#aaaaaa';
+        roundRect(vrCtx, btn.x + 14, btn.y + 14, 28, 28, 6);
+        vrCtx.fill();
+        vrCtx.lineWidth = 1.5;
+        vrCtx.strokeStyle = '#ffffff44';
+        roundRect(vrCtx, btn.x + 14, btn.y + 14, 28, 28, 6);
+        vrCtx.stroke();
+
+        // Label
+        vrCtx.font = 'bold 15px system-ui, -apple-system, sans-serif';
+        vrCtx.fillStyle = isActive ? '#ffffff' : '#cbd5e1';
+        vrCtx.textAlign = 'left';
+        vrCtx.fillText(btn.title, btn.x + 50, btn.y + 32);
+
+        // Subtext / Active badge
+        if (isActive) {
+          vrCtx.font = 'bold 10px system-ui, -apple-system, sans-serif';
+          vrCtx.fillStyle = '#60a5fa';
+          vrCtx.fillText('● ACTIVE', btn.x + 50, btn.y + 47);
+        } else {
+          vrCtx.font = '11px system-ui, -apple-system, sans-serif';
+          vrCtx.fillStyle = '#64748b';
+          vrCtx.fillText((btn.colorHex === 0x161616) ? '#161616' : '#AAAAAA', btn.x + 50, btn.y + 47);
+        }
+      }
+
+      // Action Buttons (buttons 3 to 7)
+      for (let i = 3; i < vrButtons.length; i++) {
         const btn = vrButtons[i];
         const isHovered = (hoveredButtonIndex === i);
         const isClicked = (clickedButtonIndex === i);
@@ -522,49 +696,54 @@
         } else {
           vrCtx.fillStyle = '#131822';
         }
-        roundRect(vrCtx, btn.x, btn.y, btn.w, btn.h, 16);
+        roundRect(vrCtx, btn.x, btn.y, btn.w, btn.h, 14);
         vrCtx.fill();
 
         // Border
-        vrCtx.lineWidth = isHovered ? 3 : 1.5;
+        vrCtx.lineWidth = isHovered ? 2.5 : 1.5;
         vrCtx.strokeStyle = isHovered ? btn.hoverAccent : '#232c3d';
-        roundRect(vrCtx, btn.x, btn.y, btn.w, btn.h, 16);
+        roundRect(vrCtx, btn.x, btn.y, btn.w, btn.h, 14);
         vrCtx.stroke();
 
         // Left accent indicator pill
         vrCtx.fillStyle = isHovered ? btn.hoverAccent : btn.accent;
-        roundRect(vrCtx, btn.x + 8, btn.y + 14, 6, btn.h - 28, 3);
+        roundRect(vrCtx, btn.x + 8, btn.y + 12, 5, btn.h - 24, 2.5);
         vrCtx.fill();
 
         // Title text
-        vrCtx.font = 'bold 18px system-ui, -apple-system, sans-serif';
+        vrCtx.font = 'bold 17px system-ui, -apple-system, sans-serif';
         vrCtx.fillStyle = isClicked ? '#ffffff' : (isHovered ? '#ffffff' : '#e2e8f0');
         vrCtx.textAlign = 'left';
-        vrCtx.fillText(btn.title, btn.x + 28, btn.y + 34);
+        vrCtx.fillText(btn.title, btn.x + 24, btn.y + 30);
 
         // Subtitle text
-        vrCtx.font = '13px system-ui, -apple-system, sans-serif';
+        vrCtx.font = '12px system-ui, -apple-system, sans-serif';
         vrCtx.fillStyle = isClicked ? '#f1f5f9' : (isHovered ? btn.hoverAccent : '#94a3b8');
-        vrCtx.fillText(btn.sub(), btn.x + 28, btn.y + 60);
+        vrCtx.fillText(btn.sub(), btn.x + 24, btn.y + 52);
 
         // Arrow
-        vrCtx.font = 'bold 20px system-ui, -apple-system, sans-serif';
+        vrCtx.font = 'bold 18px system-ui, -apple-system, sans-serif';
         vrCtx.fillStyle = isHovered ? btn.hoverAccent : '#475569';
         vrCtx.textAlign = 'right';
-        vrCtx.fillText('›', btn.x + btn.w - 20, btn.y + 46);
+        vrCtx.fillText('›', btn.x + btn.w - 18, btn.y + 40);
       }
 
       // Footer
-      vrCtx.font = '12px system-ui, -apple-system, sans-serif';
-      vrCtx.fillStyle = '#64748b';
+      vrCtx.font = '11px system-ui, -apple-system, sans-serif';
+      vrCtx.fillStyle = '#94a3b8';
       vrCtx.textAlign = 'center';
-      vrCtx.fillText('Aim controller laser & squeeze trigger to select', w / 2, 608);
+      vrCtx.fillText('Press [B] or [Y] on controller to toggle menu visibility', w / 2, 674);
+
+      vrCtx.font = '11px system-ui, -apple-system, sans-serif';
+      vrCtx.fillStyle = '#64748b';
+      vrCtx.fillText('Aim laser pointer & pull trigger to interact', w / 2, 694);
 
       vrCanvasTexture.needsUpdate = true;
     }
 
-    // 3D Mesh for Floating Tablet (Plane + Bezel)
-    const vrMenuGeo = new THREE.PlaneGeometry(0.36, 0.45);
+    // 3D Meshes for Floating Tablet & Minimized Pill
+    // Full Menu Mesh & Bezel
+    const vrMenuGeo = new THREE.PlaneGeometry(0.36, 0.506);
     const vrMenuMat = new THREE.MeshBasicMaterial({
       map: vrCanvasTexture,
       transparent: true,
@@ -573,7 +752,7 @@
     const vrMenuMesh = new THREE.Mesh(vrMenuGeo, vrMenuMat);
     vrMenuMesh.name = 'VR_Menu_Screen';
 
-    const bezelGeo = new THREE.BoxGeometry(0.375, 0.465, 0.012);
+    const bezelGeo = new THREE.BoxGeometry(0.375, 0.521, 0.012);
     const bezelMat = new THREE.MeshStandardMaterial({
       color: 0x111317,
       roughness: 0.4,
@@ -582,10 +761,36 @@
     const bezelMesh = new THREE.Mesh(bezelGeo, bezelMat);
     bezelMesh.position.z = -0.007;
 
+    const fullMenuContainer = new THREE.Group();
+    fullMenuContainer.name = 'Full_Menu_Container';
+    fullMenuContainer.add(bezelMesh);
+    fullMenuContainer.add(vrMenuMesh);
+
+    // Minimized Pill Mesh & Bezel
+    const pillGeo = new THREE.PlaneGeometry(0.16, 0.055);
+    const pillMat = new THREE.MeshBasicMaterial({
+      map: pillCanvasTexture,
+      transparent: true,
+      side: THREE.DoubleSide
+    });
+    const minimizedPillMesh = new THREE.Mesh(pillGeo, pillMat);
+    minimizedPillMesh.name = 'VR_Pill_Screen';
+
+    const pillBezelGeo = new THREE.BoxGeometry(0.168, 0.063, 0.008);
+    const pillBezelMesh = new THREE.Mesh(pillBezelGeo, bezelMat);
+    pillBezelMesh.position.z = -0.005;
+
+    const minimizedPillContainer = new THREE.Group();
+    minimizedPillContainer.name = 'Minimized_Pill_Container';
+    minimizedPillContainer.add(pillBezelMesh);
+    minimizedPillContainer.add(minimizedPillMesh);
+    minimizedPillContainer.visible = false;
+
+    // Tablet Group Root
     const tabletGroup = new THREE.Group();
     tabletGroup.name = 'VR_Floating_Tablet';
-    tabletGroup.add(bezelMesh);
-    tabletGroup.add(vrMenuMesh);
+    tabletGroup.add(fullMenuContainer);
+    tabletGroup.add(minimizedPillContainer);
 
     // Position comfortably at chest height: x = -0.6m, y = 1.2m, z = -1.15m
     tabletGroup.position.set(-0.6, 1.2, -1.15);
@@ -604,6 +809,7 @@
     scene.add(tabletGroup);
 
     renderVRMenuCanvas();
+    renderPillCanvas(false);
 
     function triggerHaptic(controller, intensity = 0.3, duration = 30) {
       try {
@@ -620,10 +826,21 @@
 
     function checkVRMenuHover(controller) {
       if (!tabletGroup || !tabletGroup.visible) return null;
+
       workingMatrix.identity().extractRotation(controller.matrixWorld);
       raycaster.ray.origin.setFromMatrixPosition(controller.matrixWorld);
       raycaster.ray.direction.set(0, 0, -1).applyMatrix4(workingMatrix);
 
+      // Check minimized pill
+      if (isVRMenuMinimized) {
+        const intersects = raycaster.intersectObject(minimizedPillMesh, false);
+        if (intersects.length > 0) {
+          return { isPill: true, hit: intersects[0] };
+        }
+        return null;
+      }
+
+      // Check full tablet menu
       const intersects = raycaster.intersectObject(vrMenuMesh, false);
       if (intersects.length > 0) {
         const hit = intersects[0];
@@ -640,7 +857,7 @@
               break;
             }
           }
-          return { hit, buttonIndex: hitBtn, canvasX, canvasY };
+          return { isPill: false, hit, buttonIndex: hitBtn, canvasX, canvasY };
         }
       }
       return null;
@@ -749,14 +966,48 @@
     function onSelectStart(event) {
       const controller = event.target;
 
-      // Priority 1: In-VR Menu button click
+      // Priority 1: In-VR Menu Interaction
       if (tabletGroup && tabletGroup.visible) {
         const menuHover = checkVRMenuHover(controller);
-        if (menuHover && menuHover.buttonIndex !== -1) {
-          triggerHaptic(controller, 0.45, 45);
-          flashButtonClicked(menuHover.buttonIndex);
-          handleVRButtonClick(vrButtons[menuHover.buttonIndex].id);
-          return;
+        if (menuHover) {
+          if (menuHover.isPill) {
+            // Restore from minimized
+            isVRMenuMinimized = false;
+            fullMenuContainer.visible = true;
+            minimizedPillContainer.visible = false;
+            triggerHaptic(controller, 0.4, 35);
+            renderVRMenuCanvas();
+            return;
+          }
+
+          if (menuHover.buttonIndex !== -1) {
+            const btn = vrButtons[menuHover.buttonIndex];
+            triggerHaptic(controller, 0.45, 45);
+
+            if (btn.id === 'minimize') {
+              isVRMenuMinimized = true;
+              fullMenuContainer.visible = false;
+              minimizedPillContainer.visible = true;
+              isPillHovered = false;
+              hoveredButtonIndex = -1;
+              renderPillCanvas(false);
+              return;
+            }
+
+            if (btn.id === 'bgDark') {
+              setBackgroundColor(0x161616);
+              return;
+            }
+
+            if (btn.id === 'bgLight') {
+              setBackgroundColor(0xaaaaaa);
+              return;
+            }
+
+            flashButtonClicked(menuHover.buttonIndex);
+            handleVRButtonClick(btn.id);
+            return;
+          }
         }
       }
 
@@ -1028,11 +1279,48 @@
 
     // --- Render Loop (Optimized for Quest 72/90Hz) ---
     let frameCount = 0;
+    let prevSecondaryBtnState = false;
+
     renderer.setAnimationLoop((timestamp, frame) => {
       frameCount++;
 
       if (renderer.xr.isPresenting) {
+        // --- 1. Gamepad API Secondary Button Shortcut (B on Right, Y on Left) ---
+        const session = renderer.xr.getSession();
+        if (session && session.inputSources) {
+          let secondaryPressed = false;
+          for (const source of session.inputSources) {
+            if (source.gamepad && source.gamepad.buttons && source.gamepad.buttons.length > 5) {
+              if (source.gamepad.buttons[5].pressed) {
+                secondaryPressed = true;
+                break;
+              }
+            }
+          }
+
+          // Edge detection: toggle menu visibility on rising edge
+          if (secondaryPressed && !prevSecondaryBtnState) {
+            if (tabletGroup) {
+              tabletGroup.visible = !tabletGroup.visible;
+              triggerHaptic(null, 0.3, 30);
+              if (!tabletGroup.visible) {
+                hoveredButtonIndex = -1;
+                isPillHovered = false;
+              } else {
+                if (isVRMenuMinimized) {
+                  renderPillCanvas(false);
+                } else {
+                  renderVRMenuCanvas();
+                }
+              }
+            }
+          }
+          prevSecondaryBtnState = secondaryPressed;
+        }
+
+        // --- 2. Controller Laser Raycasting ---
         let anyMenuHover = false;
+        let anyPillHover = false;
 
         controllers.forEach(controller => {
           const laser = controller.getObjectByName('laser');
@@ -1043,9 +1331,20 @@
             return;
           }
 
-          // Priority 1: Check In-VR Floating Menu Hover
+          // Priority 1: Check In-VR Floating Menu Hover (if visible)
           const menuHover = checkVRMenuHover(controller);
           if (menuHover) {
+            if (menuHover.isPill) {
+              anyPillHover = true;
+              laser.material.color.setHex(0x10b981);
+              if (!isPillHovered) {
+                isPillHovered = true;
+                triggerHaptic(controller, 0.15, 15);
+                renderPillCanvas(true);
+              }
+              return;
+            }
+
             anyMenuHover = true;
             laser.material.color.setHex(menuHover.buttonIndex !== -1 ? 0x10b981 : 0x38bdf8);
             if (hoveredButtonIndex !== menuHover.buttonIndex) {
@@ -1065,9 +1364,14 @@
           }
         });
 
+        // Clear hover states strictly when laser moves away (only updates texture on transition)
         if (!anyMenuHover && hoveredButtonIndex !== -1) {
           hoveredButtonIndex = -1;
           renderVRMenuCanvas();
+        }
+        if (!anyPillHover && isPillHovered) {
+          isPillHovered = false;
+          renderPillCanvas(false);
         }
       } else {
         controls.update();
