@@ -81,8 +81,8 @@
           Environment Lighting
         </div>
         <select id="envSelect" class="env-select" title="Choose environment reflections & lighting">
-          <option value="environments/Light_tent_studio.exr" selected>Light Tent Studio (EXR)</option>
-          <option value="environments/interior.exr">Interior Room (EXR)</option>
+          <option value="environments/interior.exr" selected>Interior Room (EXR)</option>
+          <option value="default">Default Studio (Neutral)</option>
           <option value="environments/studio.exr">Studio Neutral (EXR)</option>
           <option value="environments/studio_small_09_1k.hdr">Studio Softbox (1k HDR)</option>
           <option value="environments/courtyard.exr">Courtyard (EXR)</option>
@@ -308,7 +308,7 @@
 
     let currentRenderTarget = null;
     let currentEnvTexture = null;
-    let lastNonCustomEnv = 'environments/Light_tent_studio.exr';
+    let lastNonCustomEnv = 'environments/interior.exr';
 
     const envSelect = document.getElementById('envSelect');
     const envFileInput = document.getElementById('envFileInput');
@@ -447,14 +447,14 @@
         console.error('Error loading environment map:', err);
         updateStatus('Failed to load environment map', 'error');
         setDefaultStudioEnvironment();
-        envSelect.value = 'environments/Light_tent_studio.exr';
-        lastNonCustomEnv = 'environments/Light_tent_studio.exr';
+        envSelect.value = 'default';
+        lastNonCustomEnv = 'default';
         if (typeof renderVRMenuCanvas === 'function') renderVRMenuCanvas();
       });
     }
 
-    // Load default environment map (Light_tent_studio.exr) on startup
-    loadPresetEnvironment('environments/Light_tent_studio.exr');
+    // Load default environment map (interior.exr) on startup
+    loadPresetEnvironment('environments/interior.exr');
 
     function loadCustomEnvironmentFile(file) {
       updateStatus(`Parsing ${file.name}...`, 'loading');
@@ -572,7 +572,7 @@
 
     function getCurrentEnvName() {
       const opt = envSelect.options[envSelect.selectedIndex];
-      return opt ? opt.text.replace(/\s*\(.*\)$/, '') : 'Light Tent Studio';
+      return opt ? opt.text.replace(/\s*\(.*\)$/, '') : 'Default Studio';
     }
 
     const vrButtons = [
